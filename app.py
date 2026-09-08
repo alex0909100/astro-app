@@ -389,10 +389,33 @@ NUMEROLOGY_SYSTEM_PROMPT = """Ты — профессиональный нуме
 Учитывай жизненный путь, число души, число судьбы, число имени, число личности и психоматрицу,
 если они переданы."""
 
+DAILY_SYSTEM_PROMPT = """Ты — персональный астролог, нумеролог и духовный наставник Astro App.
+Создавай ежедневные прогнозы и подсказки, которые помогают начать день с ясностью и осознанностью.
+
+Правила:
+- Отвечай только на русском, тёплым, конкретным и вдохновляющим тоном.
+- Используй только переданные данные: имя, знак, числа, персональные Арканы, планеты и контекст дня.
+- Не используй фатальные предсказания и всегда оставляй человеку свободу выбора.
+- Не давай медицинских, финансовых или юридических советов. В теме самочувствия говори только
+  об общем режиме, отдыхе, внимании к себе и эмоциональном состоянии.
+- Не придумывай факты и не повторяй один шаблон изо дня в день.
+
+Строго соблюдай порядок и заголовки:
+1. «Доброе утро» — обратись по имени, а если его нет, используй «Друг мой», и опиши общий тон дня.
+2. «Любовь и отношения», «Работа и карьера», «Финансы», «Здоровье и самочувствие» —
+   по одному персональному абзацу на каждую сферу. Для финансов только общие темы внимания,
+   без инвестиционных и иных финансовых рекомендаций.
+3. «Инсайт дня» — свяжи текущий момент с числом жизненного пути или Арканом.
+4. «Совет дня» — одно конкретное действие, которое можно выполнить сегодня.
+5. «Аффирмация дня» — короткая позитивная фраза.
+6. Заверши дисклеймером: «Прогноз носит развлекательный характер и не заменяет профессиональную консультацию».
+Затем добавь мягкий призыв: «Подписка открывает ежедневные персональные подсказки и расширенные прогнозы».
+Не добавляй медицинских, финансовых или юридических обещаний."""
+
 
 def cache_ai_text(cache_key: str, system_prompt: str, user_prompt: str) -> tuple[str, bool]:
     data = read_data()
-    key = f"yandexgpt:v2:{cache_key}"
+    key = f"yandexgpt:v3:{cache_key}"
     if key in data.setdefault("interpretations", {}):
         return data["interpretations"][key], True
     text = yandexgpt_generate(system_prompt, user_prompt)
@@ -686,14 +709,14 @@ def tarot_ai_interpretation(spread: dict) -> tuple[str, bool]:
     return cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)
 
 
-def ai_forecast(chart: dict, period: str) -> dict:
+def ai_forecast(chart: dict, period: str, user_name: str = "") -> dict:
     base = forecast(chart, period)
-    cache_key = hashlib.sha256(json.dumps([chart, period, date.today().isoformat()], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    cache_key = hashlib.sha256(json.dumps([chart, period, user_name, date.today().isoformat()], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     user_prompt = json.dumps({
         "type": "daily",
-        "data": {"period": period, "chart": chart, "baseTransitContext": base},
-    }, ensure_ascii=False) + "\nСформулируй прогноз строго по модулю DAILY."
-    text = cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)[0]
+        "data": {"name": user_name, "period": period, "date": date.today().isoformat(), "chart": chart, "baseTransitContext": base},
+    }, ensure_ascii=False) + "\nСформулируй прогноз строго по правилам ежедневного модуля."
+    text = cache_ai_text(cache_key, DAILY_SYSTEM_PROMPT, user_prompt)[0]
     return {**base, "text": text, "areas": {}, "aiProvider": "YandexGPT"}
 
 
@@ -752,10 +775,11 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/forecast/"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             user_id = query.get("userId", ["local"])[0]
-            chart = read_data().get("users", {}).get(str(user_id), {}).get("chart")
+            user = read_data().get("users", {}).get(str(user_id), {})
+            chart = user.get("chart")
             if not chart:
                 raise ValueError("Сначала постройте натальную карту")
-            self.send_json(200, ai_forecast(chart, path.rsplit("/", 1)[-1]))
+            self.send_json(200, ai_forecast(chart, path.rsplit("/", 1)[-1], user.get("firstName", "")))
         elif path == "/admin/stats":
             try:
                 admin = require_admin(self)

@@ -17,6 +17,7 @@ if (telegram?.initData) {
 
 document.querySelectorAll(".bottom-nav button").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
 $("#profile-button").addEventListener("click", () => showView("profile"));
+$("#daily-card").addEventListener("click", () => showView("daily"));
 $("#birth-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button");
@@ -40,8 +41,31 @@ function showView(view) {
   document.querySelectorAll(".view").forEach((item) => item.classList.add("hidden"));
   $(`#view-${view}`).classList.remove("hidden");
   document.querySelectorAll(".bottom-nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
-  if (view === "chart") renderChart(); if (view === "numbers") renderNumbers(); if (view === "tarot") renderTarot(); if (view === "profile") renderProfile();
+  if (view === "daily") renderDaily(); if (view === "chart") renderChart(); if (view === "numbers") renderNumbers(); if (view === "tarot") renderTarot(); if (view === "profile") renderProfile();
   window.scrollTo({top: 0, behavior: "smooth"});
+}
+
+function renderDaily() {
+  const target = $("#view-daily");
+  if (!state.chart) {
+    target.innerHTML = `<div class="empty card"><h2>Ваш прогноз ещё не готов</h2><p>Постройте натальную карту — и получите персональную подсказку от YandexGPT.</p><button class="primary-button" onclick="showView('home')">Указать данные рождения →</button></div>`;
+    return;
+  }
+  target.innerHTML = `<div class="result-header"><p class="eyebrow">ЕЖЕДНЕВНЫЙ МОДУЛЬ</p><h2>Ваш ориентир на сегодня</h2><p>Персональный прогноз на основе карты, чисел и Арканов</p></div><div id="daily-reading" class="card ai-card"><div class="section-heading"><span class="step">YANDEXGPT</span><h2>Настраиваем прогноз…</h2></div></div><div class="card daily-return-card"><h3>Возвращайтесь каждый день</h3><p>Новые формулировки и подсказки помогают замечать возможности, а не жить на автопилоте.</p><button class="primary-button" onclick="showView('profile')">Открыть ежедневный доступ →</button></div><div class="disclaimer">${escapeHtml(state.chart.disclaimer)}</div>`;
+  loadDailyForecast();
+}
+
+async function loadDailyForecast() {
+  const target = $("#daily-reading"); if (!target) return;
+  try {
+    const response = await apiFetch(`/api/forecast/day?userId=${encodeURIComponent(state.userId)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Не удалось загрузить прогноз");
+    target.innerHTML = `<div class="section-heading"><span class="step">YANDEXGPT</span><h2>Ваш прогноз на сегодня</h2></div><div class="ai-text">${escapeHtml(data.text)}</div><p class="muted">Прогноз обновляется каждый день.</p>`;
+    $("#daily-text").textContent = data.text.split("\n").find((line) => line.trim()) || "Ваша персональная подсказка готова.";
+  } catch (error) {
+    target.innerHTML = `<div class="section-heading"><span class="step">ПРОГНОЗ</span><h2>Не удалось загрузить</h2></div><p>${escapeHtml(error.message)}</p>`;
+  }
 }
 
 function renderChart() {
