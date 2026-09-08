@@ -74,6 +74,20 @@ HOUSE_MEANINGS = {
     9: "Мировоззрение, путешествия и смысл", 10: "Призвание, карьера и репутация",
     11: "Друзья, сообщество и будущее", 12: "Отдых, подсознание и восстановление",
 }
+SIGN_STYLES = {
+    "Овен": "прямо, быстро и через инициативу", "Телец": "последовательно, чувственно и через устойчивость",
+    "Близнецы": "гибко, любознательно и через обмен идеями", "Рак": "бережно, интуитивно и через эмоциональную связь",
+    "Лев": "ярко, творчески и через личное выражение", "Дева": "точно, практично и через улучшение деталей",
+    "Весы": "дипломатично, эстетично и через поиск баланса", "Скорпион": "глубоко, интенсивно и через честность",
+    "Стрелец": "широко, свободно и через поиск смысла", "Козерог": "сдержанно, структурно и через долгосрочную цель",
+    "Водолей": "независимо, нестандартно и через идеи будущего", "Рыбы": "мягко, образно и через интуицию",
+}
+ASPECT_MEANINGS = {
+    "тригон": "Тема проявляется естественно: её легче развивать через доверие к своим сильным сторонам.",
+    "соединение": "Две силы работают одновременно и усиливают друг друга; важно направлять их в одну цель.",
+    "квадрат": "Есть внутреннее трение: результат появляется, когда человек переводит напряжение в конкретное действие.",
+    "оппозиция": "Требуется баланс между двумя полюсами и умение учитывать как себя, так и другого.",
+}
 
 
 def read_data() -> dict:
@@ -166,6 +180,53 @@ def swiss_positions(payload: dict, latitude: float, longitude: float) -> tuple[l
     return positions, {"ascendant": round(angles[0], 4), "mc": round(angles[1], 4), "system": "Placidus"}
 
 
+def build_interpretation(positions: list[dict], path: int, sign: str, matrix: dict[str, int], aspects: list[dict]) -> dict:
+    by_name = {item["name"]: item for item in positions}
+    sun, moon = by_name["Солнце"], by_name["Луна"]
+    venus, mars = by_name["Венера"], by_name["Марс"]
+    dominant = sorted(matrix.items(), key=lambda pair: pair[1], reverse=True)[0]
+    sections = [
+        {
+            "title": "Главная тема",
+            "text": f"Ваш базовый стиль — действовать {SIGN_STYLES[sign]}. Число жизненного пути {path} добавляет задачу развивать этот стиль через опыт, а не через ожидание идеальных условий. Важный ориентир: выбирать не самый быстрый вариант, а тот, который можно поддерживать регулярно.",
+        },
+        {
+            "title": "Личность и самореализация",
+            "text": f"Солнце в {sun['sign']} в {sun['house']}-м доме показывает, что самоощущение раскрывается в теме «{HOUSE_MEANINGS[sun['house']].lower()}». Вы проявляетесь {SIGN_STYLES[sun['sign']]}. Сильная сторона — видеть, как превратить личное качество в заметный результат. Риск — оценивать себя только по внешнему признанию или продуктивности.",
+        },
+        {
+            "title": "Эмоции и внутренняя опора",
+            "text": f"Луна в {moon['sign']} в {moon['house']}-м доме описывает эмоциональную реакцию {SIGN_STYLES[moon['sign']]}. Безопасность для вас связана с темой «{HOUSE_MEANINGS[moon['house']].lower()}». В перегрузе полезно сначала назвать своё состояние и вернуть базовый ритм, а уже потом принимать важные решения.",
+        },
+        {
+            "title": "Мышление и общение",
+            "text": f"Меркурий в {by_name['Меркурий']['sign']} в {by_name['Меркурий']['house']}-м доме даёт способ думать и говорить {SIGN_STYLES[by_name['Меркурий']['sign']]}. Лучше всего вы объясняете сложное, когда связываете идею с конкретным примером. Важная практика — фиксировать договорённости письменно и не перегружать собеседника несколькими задачами сразу.",
+        },
+        {
+            "title": "Любовь и близость",
+            "text": f"Венера в {venus['sign']} в {venus['house']}-м доме показывает, что симпатия выражается {SIGN_STYLES[venus['sign']]}, а ценность отношений раскрывается в теме «{HOUSE_MEANINGS[venus['house']].lower()}». Вам подходят отношения, где есть одновременно уважение к границам и понятные проявления заботы. Не подменяйте гармонию замалчиванием неудобных вопросов.",
+        },
+        {
+            "title": "Действие, деньги и карьера",
+            "text": f"Марс в {mars['sign']} в {mars['house']}-м доме показывает, как вы добиваетесь целей: {SIGN_STYLES[mars['sign']]}. Энергию легче направить в проекты, связанные с темой «{HOUSE_MEANINGS[mars['house']].lower()}». Для финансовых и рабочих решений используйте проверяемые данные, сроки и лимиты; карта не заменяет профессиональную консультацию.",
+        },
+        {
+            "title": "Ресурс и зона внимания",
+            "text": f"В психоматрице сильнее всего представлена цифра {dominant[0]} ({dominant[1]} повторения): {NUMBER_MEANINGS[dominant[0]]['text']} Если какой-то цифры нет, это не «приговор», а навык, который полезно развивать намеренно через маленькие повторяемые действия.",
+        },
+    ]
+    aspect_sections = [
+        {"title": f"{item['first']} — {item['second']}: {item['type']}", "text": ASPECT_MEANINGS.get(item["type"], "Связь двух тем карты требует осознанного баланса.")}
+        for item in aspects
+    ]
+    actions = [
+        "Выберите одну цель на ближайшие 7 дней и заранее определите минимальный ежедневный шаг.",
+        f"Важные разговоры проводите с учётом своей эмоциональной реакции Луны в {moon['sign']}: сначала пауза, затем формулировка просьбы.",
+        "Раз в неделю сверяйте решения с тремя критериями: польза, цена и соответствие вашим ценностям.",
+    ]
+    return {"sections": sections, "aspects": aspect_sections, "actions": actions}
+
+
 def calculate(payload: dict) -> dict:
     parsed = date.fromisoformat(payload["birthDate"])
     place = payload.get("placeName", "Не указан").strip() or "Не указан"
@@ -194,21 +255,22 @@ def calculate(payload: dict) -> dict:
         {"first": "Венера", "second": "Марс", "type": "соединение", "orb": 1.8},
     ]
     path = life_path(payload["birthDate"])
+    matrix = matrix_for(payload["birthDate"])
+    detailed = build_interpretation(positions, path, sign, matrix, aspects)
     return {
         "birthDate": payload["birthDate"], "birthTime": payload.get("birthTime") or "не указано",
         "place": place, "zodiac": sign, "lifePath": path,
         "soulNumber": reduce_number(sum(int(char) for char in payload["birthDate"].replace("-", ""))),
         "nameNumber": name_number(payload.get("fullName", "")) if payload.get("fullName") else None,
-        "matrix": matrix_for(payload["birthDate"]), "planets": positions, "aspects": aspects,
+        "matrix": matrix, "planets": positions, "aspects": aspects,
         "numberMeanings": NUMBER_MEANINGS,
         "houseMeanings": HOUSE_MEANINGS,
         "houses": swiss_houses or {"ascendant": round(degree(seed + "|asc", 360), 2), "system": "Placidus"},
         "coordinates": {"latitude": latitude, "longitude": geo_longitude},
-        "interpretation": (
-            f"Число жизненного пути {path} связано с поиском собственного ритма и опыта. "
-            f"Солнце в знаке {sign} помогает проявлять себя через устойчивость и осознанный выбор. "
-            "Попробуйте сегодня заметить, какие решения дают ощущение внутренней опоры."
-        ),
+        "interpretation": detailed["sections"][0]["text"],
+        "interpretationSections": detailed["sections"],
+        "interpretationAspects": detailed["aspects"],
+        "practicalActions": detailed["actions"],
         "disclaimer": DISCLAIMER,
         "calculationMode": calculation_mode,
     }
