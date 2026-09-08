@@ -288,6 +288,33 @@ def write_data(data: dict) -> None:
         DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def register_user(telegram_user: dict, source: str = "mini_app") -> dict:
+    user_id = str(telegram_user.get("id", "")).strip()
+    if not user_id:
+        raise ValueError("Telegram user id is required")
+    data = read_data()
+    now = datetime.utcnow().isoformat()
+    user = data.setdefault("users", {}).setdefault(user_id, {
+        "freeAttemptUsed": False,
+        "subscription": None,
+        "telegramId": user_id,
+        "registeredAt": now,
+    })
+    user.setdefault("registeredAt", now)
+    user["lastActiveAt"] = now
+    user["telegramId"] = user_id
+    user["firstName"] = telegram_user.get("first_name", user.get("firstName", ""))
+    user["lastName"] = telegram_user.get("last_name", user.get("lastName", ""))
+    user["username"] = telegram_user.get("username", user.get("username", ""))
+    user["languageCode"] = telegram_user.get("language_code", user.get("languageCode", ""))
+    user["lastSource"] = source
+    sources = user.setdefault("sources", [])
+    if source not in sources:
+        sources.append(source)
+    write_data(data)
+    return user
+
+
 def telegram_api(method: str, payload: dict) -> dict:
     token = os.getenv("BOT_TOKEN")
     if not token:
@@ -752,6 +779,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/access":
             telegram_user = validate_telegram_init_data(self.headers.get("X-Telegram-Init-Data", ""))
             admin = is_admin_telegram_user(telegram_user)
+            register_user(telegram_user, "mini_app")
             self.send_json(200, {"isAdmin": admin, "subscription": admin_subscription() if admin else None})
         elif path == "/api/tarot/topics":
             self.send_json(200, {"topics": TAROT_TOPICS, "spreads": TAROT_SPREADS, "decks": ["classic", "midnight", "gold"], "disclaimer": TAROT_DISCLAIMER})
@@ -829,7 +857,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 if active_filter in ("true", "false") and is_active != (active_filter == "true"):
                     continue
-                users.append({"userId": str(user_id), "username": user.get("username", ""), "firstName": user.get("firstName", ""), "registeredAt": user.get("registeredAt"), "lastActiveAt": user.get("lastActiveAt"), "subscription": user.get("subscription"), "isVip": is_vip, "isActive": is_active})
+                users.append({"userId": str(user_id), "telegramId": user.get("telegramId", str(user_id)), "username": user.get("username", ""), "firstName": user.get("firstName", ""), "lastName": user.get("lastName", ""), "languageCode": user.get("languageCode", ""), "registeredAt": user.get("registeredAt"), "lastActiveAt": user.get("lastActiveAt"), "lastSource": user.get("lastSource", ""), "sources": user.get("sources", []), "subscription": user.get("subscription"), "isVip": is_vip, "isActive": is_active})
             sort_key = query.get("sort", ["registeredAt"])[0]
             users.sort(key=lambda item: item.get(sort_key) or "", reverse=query.get("direction", ["desc"])[0] != "asc")
             self.send_json(200, {"users": users})
@@ -880,6 +908,7 @@ class Handler(BaseHTTPRequestHandler):
                 init_data = self.headers.get("X-Telegram-Init-Data", "")
                 telegram_user = validate_telegram_init_data(init_data) if init_data else {}
                 if telegram_user:
+                    register_user(telegram_user, "mini_app")
                     payload["telegramUser"] = telegram_user
                     payload["userId"] = str(telegram_user["id"])
                 chart = calculate(payload)
@@ -902,6 +931,13 @@ class Handler(BaseHTTPRequestHandler):
                 user["chart"] = chart
                 write_data(data)
                 self.send_json(200, chart)
+            elif path == "/api/register-user":
+                expected = os.getenv("BOT_TOKEN", "")
+                if not expected or self.headers.get("X-Bot-Token", "") != expected:
+                    raise PermissionError("Bot registration access denied")
+                telegram_user = payload.get("telegramUser") or payload
+                user = register_user(telegram_user, "bot")
+                self.send_json(200, {"ok": True, "userId": user["telegramId"]})
             elif path == "/api/feedback":
                 init_data = self.headers.get("X-Telegram-Init-Data", "")
                 sender = validate_telegram_init_data(init_data)

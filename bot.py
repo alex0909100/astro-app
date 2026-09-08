@@ -42,8 +42,33 @@ def app_keyboard() -> InlineKeyboardMarkup:
     ]])
 
 
+async def register_bot_user(message: Message) -> None:
+    user = message.from_user
+    if not user:
+        return
+    payload = {
+        "id": user.id,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "username": user.username,
+        "language_code": user.language_code,
+    }
+    request = urllib.request.Request(
+        f"{APP_API_URL}/api/register-user",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "X-Bot-Token": os.environ.get("BOT_TOKEN", "")},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):
+            pass
+    except (OSError, ValueError):
+        # Registration must not prevent the bot from answering the user.
+        pass
+
+
 @router.message(CommandStart())
 async def start(message: Message) -> None:
+    await register_bot_user(message)
     await message.answer(
         "Добро пожаловать в Astro App ✦\n"
         "Постройте карту рождения, изучите числа и получите подсказки для саморефлексии.",
@@ -53,6 +78,7 @@ async def start(message: Message) -> None:
 
 @router.message(Command("admin"))
 async def admin(message: Message) -> None:
+    await register_bot_user(message)
     if not ADMIN_TELEGRAM_IDS or str(message.from_user.id) not in ADMIN_TELEGRAM_IDS:
         await message.answer("Доступ запрещён.")
         return
@@ -63,6 +89,7 @@ async def admin(message: Message) -> None:
 
 @router.message(F.text == "/subscribe")
 async def subscribe(message: Message, bot: Bot) -> None:
+    await register_bot_user(message)
     await bot.send_invoice(
         chat_id=message.chat.id,
         title="Astro App · месяц",
