@@ -126,6 +126,16 @@ MAJOR_ARCANA = [
     ("Суд", "осознание, призвание, новый ответ", "самокритика, откладывание решения"),
     ("Мир", "завершение, целостность, результат", "незакрытый цикл, рассеянность"),
 ]
+MAJOR_ARCANA_BY_NUMBER = {
+    (index or 22): {
+        "name": name,
+        "shortUpright": upright.split(",")[0],
+        "fullUpright": upright,
+        "shortReversed": reversed_text.split(",")[0],
+        "fullReversed": reversed_text,
+    }
+    for index, (name, upright, reversed_text) in enumerate(MAJOR_ARCANA)
+}
 MINOR_SUITS = {"Жезлы": "воля и действие", "Кубки": "чувства и отношения", "Мечи": "мысли и решения", "Пентакли": "ресурсы и практика"}
 TAROT_POSITIONS = [("Прошлое / корень ситуации", "Что сформировало текущий фон?"), ("Настоящее / суть вопроса", "Что происходит сейчас?"), ("Будущее / совет", "Куда направить внимание и какой шаг возможен?")]
 TAROT_SPREADS = {
@@ -164,15 +174,11 @@ TAROT_SAFETY_MESSAGE = "Карты не отвечают на вопросы о 
 
 
 def tarot_deck() -> list[dict]:
-    # In this system the Fool is 22 (the equivalent of 0), followed by Magician 1.
-    major_numbers = {name: (index or 22) for index, (name, _, _) in enumerate(MAJOR_ARCANA)}
     deck = [{
-        "id": f"major-{number}", "name": name, "number": number, "suit": None,
-        "arcana": "Старший Аркан", "element": "дух",
-        "shortUpright": upright.split(",")[0], "fullUpright": upright,
-        "shortReversed": reversed_text.split(",")[0], "fullReversed": reversed_text,
-        "upright": upright, "reversed": reversed_text,
-    } for name, upright, reversed_text in MAJOR_ARCANA for number in [major_numbers[name]]]
+        "id": f"major-{number}", "name": card["name"], "number": number, "suit": None,
+        "arcana": "Старший Аркан", "element": "дух", **card,
+        "upright": card["fullUpright"], "reversed": card["fullReversed"],
+    } for number, card in MAJOR_ARCANA_BY_NUMBER.items()]
     for suit, theme in MINOR_SUITS.items():
         for number in range(1, 11):
             label = "Туз" if number == 1 else str(number)
@@ -186,8 +192,7 @@ def tarot_deck() -> list[dict]:
 
 def personal_arcana(birth_date: str) -> dict:
     parsed = date.fromisoformat(birth_date) if "-" in birth_date else datetime.strptime(birth_date, "%d.%m.%Y").date()
-    cards = tarot_deck()
-    by_number = {card["number"]: card for card in cards if card["arcana"] == "Старший Аркан"}
+    by_number = MAJOR_ARCANA_BY_NUMBER
     def reduce_arcana(value: int) -> int:
         while value > 22:
             value -= 22
