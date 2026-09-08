@@ -126,15 +126,25 @@ MAJOR_ARCANA = [
     ("Суд", "осознание, призвание, новый ответ", "самокритика, откладывание решения"),
     ("Мир", "завершение, целостность, результат", "незакрытый цикл, рассеянность"),
 ]
+MAJOR_ARCANA_NUMBER_NAMES = {
+    1: "Маг", 2: "Верховная Жрица", 3: "Императрица", 4: "Император",
+    5: "Иерофант", 6: "Влюблённые", 7: "Колесница", 8: "Сила",
+    9: "Отшельник", 10: "Колесо Фортуны", 11: "Справедливость",
+    12: "Повешенный", 13: "Смерть", 14: "Умеренность", 15: "Дьявол",
+    16: "Башня", 17: "Звезда", 18: "Луна", 19: "Солнце", 20: "Суд",
+    21: "Мир", 22: "Шут",
+}
+_major_meanings_by_name = {name: (upright, reversed_text) for name, upright, reversed_text in MAJOR_ARCANA}
 MAJOR_ARCANA_BY_NUMBER = {
-    (index or 22): {
+    number: {
         "name": name,
-        "shortUpright": upright.split(",")[0],
-        "fullUpright": upright,
-        "shortReversed": reversed_text.split(",")[0],
-        "fullReversed": reversed_text,
+        "aliases": (["Верховный Жрец"] if name == "Иерофант" else ["Дурак"] if name == "Шут" else []),
+        "shortUpright": _major_meanings_by_name[name][0].split(",")[0],
+        "fullUpright": _major_meanings_by_name[name][0],
+        "shortReversed": _major_meanings_by_name[name][1].split(",")[0],
+        "fullReversed": _major_meanings_by_name[name][1],
     }
-    for index, (name, upright, reversed_text) in enumerate(MAJOR_ARCANA)
+    for number, name in MAJOR_ARCANA_NUMBER_NAMES.items()
 }
 MINOR_SUITS = {"Жезлы": "воля и действие", "Кубки": "чувства и отношения", "Мечи": "мысли и решения", "Пентакли": "ресурсы и практика"}
 TAROT_POSITIONS = [("Прошлое / корень ситуации", "Что сформировало текущий фон?"), ("Настоящее / суть вопроса", "Что происходит сейчас?"), ("Будущее / совет", "Куда направить внимание и какой шаг возможен?")]
@@ -176,6 +186,7 @@ TAROT_SAFETY_MESSAGE = "Карты не отвечают на вопросы о 
 def tarot_deck() -> list[dict]:
     deck = [{
         "id": f"major-{number}", "name": card["name"], "number": number, "suit": None,
+        "aliases": card["aliases"],
         "arcana": "Старший Аркан", "element": "дух", **card,
         "upright": card["fullUpright"], "reversed": card["fullReversed"],
     } for number, card in MAJOR_ARCANA_BY_NUMBER.items()]
