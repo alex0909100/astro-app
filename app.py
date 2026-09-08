@@ -288,6 +288,50 @@ def write_data(data: dict) -> None:
         DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def telegram_api(method: str, payload: dict) -> dict:
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise ValueError("BOT_TOKEN is not configured")
+    request = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/{method}",
+        data=json.dumps(payload, ensure_ascii=False).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        result = json.loads(response.read())
+    if not result.get("ok"):
+        raise ValueError(f"Telegram API error: {result.get('description', 'unknown error')}")
+    return result
+
+
+def require_admin(handler: BaseHTTPRequestHandler) -> dict:
+    admin_telegram_id = os.getenv("ADMIN_TELEGRAM_ID", "")
+    if not admin_telegram_id:
+        raise ValueError("ADMIN_TELEGRAM_ID is not configured")
+    init_data = handler.headers.get("X-Telegram-Init-Data", "")
+    user = validate_telegram_init_data(init_data)
+    if str(user.get("id")) != str(admin_telegram_id):
+        raise PermissionError("Admin access denied")
+    return user
+
+
+def record_admin_action(data: dict, admin_id: str, action: str, target_id: str = "", details: dict | None = None) -> None:
+    data.setdefault("admin_actions", []).append({
+        "adminId": str(admin_id), "action": action, "targetId": str(target_id),
+        "details": details or {}, "createdAt": datetime.utcnow().isoformat(),
+    })
+
+
+def user_is_active(user: dict, cutoff: datetime) -> bool:
+    value = user.get("lastActiveAt") or user.get("registeredAt")
+    if not value:
+        return False
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None) >= cutoff
+    except ValueError:
+        return False
+
+
 def reduce_number(value: int) -> int:
     while value > 9 and value not in (11, 22, 33):
         value = sum(int(char) for char in str(value))
@@ -550,6 +594,75 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"birthDate": birth_date, "personalArcana": personal_arcana(birth_date)})
         elif path.startswith("/api/forecast/"):
             self.send_json(200, forecast({"birthDate": "1990-05-17"}, path.rsplit("/", 1)[-1]))
+        elif path == "/admin/stats":
+            try:
+                admin = require_admin(self)
+            except PermissionError as error:
+                self.send_json(403, {"error": str(error)})
+                return
+            except ValueError as error:
+                self.send_json(503, {"error": str(error)})
+                return
+            data = read_data()
+            users = list(data.get("users", {}).values())
+            cutoff = datetime.utcnow() - timedelta(days=7)
+            registrations = {}
+            for user in users:
+                day = (user.get("registeredAt") or "")[:10]
+                if day:
+                    registrations[day] = registrations.get(day, 0) + 1
+            vip = []
+            for user in users:
+                subscription = user.get("subscription") or {}
+                try:
+                    expires = datetime.fromisoformat((subscription.get("expiresAt") or "1970-01-01").replace("Z", "+00:00")).replace(tzinfo=None)
+                except ValueError:
+                    expires = datetime.min
+                if subscription.get("status") == "active" and expires > datetime.utcnow():
+                    vip.append(user)
+            self.send_json(200, {"totalUsers": len(users), "activeUsers": sum(user_is_active(u, cutoff) for u in users), "vipUsers": len(vip), "registrations": [{"date": day, "count": count} for day, count in sorted(registrations.items())], "adminId": str(admin["id"])})
+        elif path == "/admin/users":
+            try:
+                require_admin(self)
+            except PermissionError as error:
+                self.send_json(403, {"error": str(error)})
+                return
+            except ValueError as error:
+                self.send_json(503, {"error": str(error)})
+                return
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            search = query.get("search", [""])[0].casefold()
+            vip_filter = query.get("vip", [""])[0]
+            active_filter = query.get("active", [""])[0]
+            data = read_data()
+            users = []
+            cutoff = datetime.utcnow() - timedelta(days=7)
+            for user_id, user in data.get("users", {}).items():
+                if search and search not in f"{user_id} {user.get('username', '')} {user.get('firstName', '')}".casefold():
+                    continue
+                subscription = user.get("subscription") or {}
+                is_vip = subscription.get("status") == "active" and (subscription.get("expiresAt") or "") > datetime.utcnow().isoformat()
+                is_active = user_is_active(user, cutoff)
+                if vip_filter in ("true", "false") and is_vip != (vip_filter == "true"):
+                    continue
+                if active_filter in ("true", "false") and is_active != (active_filter == "true"):
+                    continue
+                users.append({"userId": str(user_id), "username": user.get("username", ""), "firstName": user.get("firstName", ""), "registeredAt": user.get("registeredAt"), "lastActiveAt": user.get("lastActiveAt"), "subscription": user.get("subscription"), "isVip": is_vip, "isActive": is_active})
+            sort_key = query.get("sort", ["registeredAt"])[0]
+            users.sort(key=lambda item: item.get(sort_key) or "", reverse=query.get("direction", ["desc"])[0] != "asc")
+            self.send_json(200, {"users": users})
+        elif path == "/admin/feedback":
+            try:
+                require_admin(self)
+            except PermissionError as error:
+                self.send_json(403, {"error": str(error)})
+                return
+            except ValueError as error:
+                self.send_json(503, {"error": str(error)})
+                return
+            self.send_json(200, {"messages": read_data().get("feedback_messages", [])})
+        elif path == "/admin":
+            self.send_file(STATIC / "admin.html")
         else:
             relative = "index.html" if path == "/" else path.removeprefix("/")
             file_path = (STATIC / relative).resolve()
@@ -574,15 +687,36 @@ class Handler(BaseHTTPRequestHandler):
                 user_id = payload.get("userId", "local")
                 data = read_data()
                 user = data["users"].setdefault(user_id, {"freeAttemptUsed": False, "subscription": None, "telegramId": user_id})
+                user.setdefault("registeredAt", datetime.utcnow().isoformat())
+                user["lastActiveAt"] = datetime.utcnow().isoformat()
                 if telegram_user:
                     user["telegramId"] = telegram_user["id"]
                     user["firstName"] = telegram_user.get("first_name", "")
+                    user["username"] = telegram_user.get("username", "")
                 if user["freeAttemptUsed"] and not user.get("subscription"):
                     chart["locked"] = True
                 user["freeAttemptUsed"] = True
                 user["chart"] = chart
                 write_data(data)
                 self.send_json(200, chart)
+            elif path == "/api/feedback":
+                init_data = self.headers.get("X-Telegram-Init-Data", "")
+                sender = validate_telegram_init_data(init_data)
+                message = str(payload.get("message", "")).strip()
+                if not message or len(message) > 2000:
+                    raise ValueError("Feedback message must contain 1-2000 characters")
+                data = read_data()
+                sender_id = str(sender["id"])
+                data.setdefault("feedback_messages", []).append({
+                    "id": hashlib.sha256(f"{sender_id}:{datetime.utcnow().isoformat()}".encode()).hexdigest()[:16],
+                    "userId": sender_id, "username": sender.get("username", ""),
+                    "message": message, "status": "new", "createdAt": datetime.utcnow().isoformat(),
+                })
+                write_data(data)
+                admin_id = os.getenv("ADMIN_TELEGRAM_ID")
+                if admin_id:
+                    telegram_api("sendMessage", {"chat_id": admin_id, "text": f"Новое сообщение от пользователя {sender_id} (@{sender.get('username', 'без username')}):\n\n{message}"})
+                self.send_json(200, {"ok": True})
             elif path == "/api/interpretation":
                 self.send_json(200, {"text": make_interpretation(payload["chart"], payload.get("kind", "day")), "cached": True})
             elif path == "/api/tarot/spread":
@@ -651,8 +785,49 @@ class Handler(BaseHTTPRequestHandler):
                 with urllib.request.urlopen(request, timeout=5) as response:
                     result = json.loads(response.read())
                 self.send_json(200, {"results": result})
+            elif path == "/admin/set-vip":
+                admin = require_admin(self)
+                target = str(payload.get("userId", "")).strip()
+                username = str(payload.get("username", "")).strip().lstrip("@").casefold()
+                data = read_data()
+                if not target and username:
+                    target = next((user_id for user_id, user in data.get("users", {}).items() if user.get("username", "").casefold() == username), "")
+                if not target or target not in data.get("users", {}):
+                    raise ValueError("User not found")
+                user = data["users"][target]
+                enabled = bool(payload.get("vip", True))
+                if enabled:
+                    days = max(1, min(int(payload.get("days", 30)), 3650))
+                    user["subscription"] = {"plan": "admin", "status": "active", "expiresAt": (datetime.utcnow() + timedelta(days=days)).isoformat(), "paymentMode": "admin"}
+                    action = "vip_granted"
+                    message = str(payload.get("message") or f"Вам активирован VIP-доступ на {days} дней.")
+                else:
+                    user["subscription"] = None
+                    action = "vip_revoked"
+                    message = str(payload.get("message") or "Ваш VIP-доступ отключён.")
+                record_admin_action(data, str(admin["id"]), action, target, {"days": payload.get("days", 30)})
+                write_data(data)
+                if payload.get("notify", True) and user.get("telegramId"):
+                    telegram_api("sendMessage", {"chat_id": user["telegramId"], "text": message})
+                self.send_json(200, {"ok": True, "userId": target, "subscription": user.get("subscription")})
+            elif path == "/admin/feedback":
+                admin = require_admin(self)
+                target = str(payload.get("userId", "")).strip()
+                message = str(payload.get("message", "")).strip()
+                if not target or not message or len(message) > 2000:
+                    raise ValueError("userId and message are required")
+                telegram_api("sendMessage", {"chat_id": target, "text": message})
+                data = read_data()
+                for item in data.setdefault("feedback_messages", []):
+                    if item.get("userId") == target and item.get("status") == "new":
+                        item["status"] = "answered"
+                record_admin_action(data, str(admin["id"]), "feedback_reply", target, {"messageLength": len(message)})
+                write_data(data)
+                self.send_json(200, {"ok": True})
             else:
                 self.send_error(404, "Not found")
+        except PermissionError as error:
+            self.send_json(403, {"error": str(error)})
         except (ValueError, KeyError, json.JSONDecodeError) as error:
             self.send_json(400, {"error": str(error)})
         except Exception as error:

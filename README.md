@@ -23,6 +23,7 @@ python app.py
 - удаление пользовательских данных;
 - endpoint `/api/geocode` с Nominatim;
 - endpoint `/api/compatibility`.
+- защищённая админ-панель `/admin` со статистикой, VIP-управлением и обратной связью.
 - раздел «Таро»: полная колода 78 карт, схемы «Три карты», «Кельтский крест» и «Выбор»;
 - персональные Арканы Личности, Судьбы и Дополнительный по дате рождения;
 - «Карта дня», история раскладов и структурированный AI-prompt с учётом позиций, перевёрнутых карт и сочетаний.
@@ -70,6 +71,36 @@ Telegram принимает Mini App только по HTTPS (кроме спе�
 7. запустить ежедневный worker уведомлений.
 
 Переменные окружения: `BOT_TOKEN`, `AI_API_KEY`, `DATABASE_URL`, `ENCRYPTION_KEY`, `PORT`.
+
+### Админ-панель
+
+Укажите в Railway Variables `ADMIN_TELEGRAM_ID` — числовой Telegram ID администратора. Откройте `/admin` внутри Telegram Mini App или отправьте боту `/admin`. Каждый admin API-запрос проверяет подписанный `X-Telegram-Init-Data`; одного знания URL недостаточно.
+
+Доступные endpoints: `GET /admin/stats`, `GET /admin/users`, `POST /admin/set-vip`, `GET/POST /admin/feedback`. Сообщения пользователей отправляются через `POST /api/feedback` и пересылаются администратору ботом. Для PostgreSQL предусмотрены сущности `admin_actions` и `feedback_messages`; текущий MVP сохраняет их в `astro_data.json` до миграции storage.
+
+Рекомендуемая схема PostgreSQL:
+
+```sql
+CREATE TABLE admin_actions (
+  id BIGSERIAL PRIMARY KEY,
+  admin_telegram_id BIGINT NOT NULL,
+  action TEXT NOT NULL,
+  target_user_id BIGINT,
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE feedback_messages (
+  id UUID PRIMARY KEY,
+  user_telegram_id BIGINT NOT NULL,
+  username TEXT,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new',
+  reply TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  answered_at TIMESTAMPTZ
+);
+```
 
 ## Проверка текущего экземпляра
 

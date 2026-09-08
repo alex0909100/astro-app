@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramNetworkError
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -29,6 +29,7 @@ router = Router()
 WEB_APP_URL = os.environ["WEB_APP_URL"]
 MONTHLY_STARS = int(os.getenv("MONTHLY_STARS", "300"))
 APP_API_URL = os.getenv("APP_API_URL", "http://127.0.0.1:8000")
+ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID", "")
 
 
 def app_keyboard() -> InlineKeyboardMarkup:
@@ -44,6 +45,16 @@ async def start(message: Message) -> None:
         "Постройте карту рождения, изучите числа и получите подсказки для саморефлексии.",
         reply_markup=app_keyboard(),
     )
+
+
+@router.message(Command("admin"))
+async def admin(message: Message) -> None:
+    if not ADMIN_TELEGRAM_ID or str(message.from_user.id) != str(ADMIN_TELEGRAM_ID):
+        await message.answer("Доступ запрещён.")
+        return
+    await message.answer("Админ-панель Astro App:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Открыть админ-панель", web_app=WebAppInfo(url=f"{WEB_APP_URL.rstrip('/')}/admin"))
+    ]]))
 
 
 @router.message(F.text == "/subscribe")
@@ -90,6 +101,7 @@ async def configure_bot(bot: Bot) -> None:
     await bot.set_my_commands([
         BotCommand(command="start", description="Открыть Astro App"),
         BotCommand(command="subscribe", description="Оформить подписку Stars"),
+        BotCommand(command="admin", description="Админ-панель"),
     ])
     await bot.set_chat_menu_button(menu_button={"type": "web_app", "text": "Astro App", "web_app": WebAppInfo(url=WEB_APP_URL)})
 
