@@ -5,6 +5,15 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 const telegram = window.Telegram?.WebApp;
 telegram?.ready();
 telegram?.expand();
+if (telegram?.initData) {
+  apiFetch("/api/access").then((response) => response.json()).then((access) => {
+    if (access.isAdmin) {
+      state.subscription = access.subscription;
+      localStorage.setItem("astroSubscription", JSON.stringify(state.subscription));
+      if (state.chart) renderProfile();
+    }
+  }).catch(() => {});
+}
 
 document.querySelectorAll(".bottom-nav button").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
 $("#profile-button").addEventListener("click", () => showView("profile"));
@@ -17,7 +26,12 @@ $("#birth-form").addEventListener("submit", async (event) => {
   try {
     const response = await apiFetch("/api/calculate", { method: "POST", body: JSON.stringify(payload) });
     if (!response.ok) throw new Error((await response.json()).error || "Не удалось выполнить расчёт");
-    state.chart = await response.json(); localStorage.setItem("astroChart", JSON.stringify(state.chart));
+    state.chart = await response.json();
+    if (state.chart.subscription) {
+      state.subscription = state.chart.subscription;
+      localStorage.setItem("astroSubscription", JSON.stringify(state.subscription));
+    }
+    localStorage.setItem("astroChart", JSON.stringify(state.chart));
     await track("chart_created"); renderChart(); showView("chart");
   } catch (error) { alert(error.message); } finally { button.disabled = false; button.innerHTML = "Построить карту <span>→</span>"; }
 });

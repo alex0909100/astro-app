@@ -420,6 +420,10 @@ def admin_subscription() -> dict:
     return {"plan": "admin", "status": "active", "permanent": True, "paymentMode": "admin"}
 
 
+def is_admin_telegram_user(user: dict) -> bool:
+    return bool(user and str(user.get("id")) in admin_ids())
+
+
 def record_admin_action(data: dict, admin_id: str, action: str, target_id: str = "", details: dict | None = None) -> None:
     data.setdefault("admin_actions", []).append({
         "adminId": str(admin_id), "action": action, "targetId": str(target_id),
@@ -703,6 +707,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/config":
             yandex_ready = bool((os.getenv("YANDEX_API_KEY") or os.getenv("YANDEXGPT_API_KEY")) and os.getenv("YANDEX_FOLDER_ID"))
             self.send_json(200, {"telegram": bool(os.getenv("BOT_TOKEN")), "ai": yandex_ready, "aiProvider": "YandexGPT" if yandex_ready else None, "stars": bool(os.getenv("BOT_TOKEN"))})
+        elif path == "/api/access":
+            telegram_user = validate_telegram_init_data(self.headers.get("X-Telegram-Init-Data", ""))
+            admin = is_admin_telegram_user(telegram_user)
+            self.send_json(200, {"isAdmin": admin, "subscription": admin_subscription() if admin else None})
         elif path == "/api/tarot/topics":
             self.send_json(200, {"topics": TAROT_TOPICS, "spreads": TAROT_SPREADS, "decks": ["classic", "midnight", "gold"], "disclaimer": TAROT_DISCLAIMER})
         elif path.startswith("/api/tarot/history"):
@@ -841,8 +849,10 @@ class Handler(BaseHTTPRequestHandler):
                     user["telegramId"] = telegram_user["id"]
                     user["firstName"] = telegram_user.get("first_name", "")
                     user["username"] = telegram_user.get("username", "")
-                if telegram_user and str(telegram_user["id"]) in admin_ids():
+                if is_admin_telegram_user(telegram_user):
                     user["subscription"] = admin_subscription()
+                    chart["adminAccess"] = True
+                    chart["subscription"] = user["subscription"]
                 if user["freeAttemptUsed"] and not is_active_subscription(user.get("subscription")):
                     chart["locked"] = True
                 user["freeAttemptUsed"] = True
