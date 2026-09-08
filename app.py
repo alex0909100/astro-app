@@ -213,9 +213,20 @@ def personal_arcana(birth_date: str) -> dict:
     destiny = reduce_arcana(sum(int(char) for char in birth_date if char.isdigit()))
     additional = reduce_arcana(sum(int(char) for char in f"{parsed.month:02d}{parsed.year:04d}"))
     result = {}
+    role_descriptions = {
+        "personality": "Показывает ваш характер: как вы проявляетесь, принимаете решения и раскрываете сильные стороны.",
+        "destiny": "Задаёт общий жизненный урок: какую тему важно проживать осознанно, не перекладывая выбор на обстоятельства.",
+        "additional": "Показывает социальную реализацию: как ваши качества проявляются в работе, обществе и совместных проектах.",
+    }
     for key, number in (("personality", personality), ("destiny", destiny), ("additional", additional)):
         card = by_number[number]
-        result[key] = {"number": number, "name": card["name"], "description": card["fullUpright"], "light": card["shortUpright"], "shadow": card["shortReversed"]}
+        result[key] = {
+            "number": number,
+            "name": card["name"],
+            "description": f"{role_descriptions[key]} Ваша карта — «{card['shortUpright']}». В плюсе это проявляется через «{card['shortUpright']}», а в тени — через «{card['shortReversed']}».",
+            "light": card["shortUpright"],
+            "shadow": card["shortReversed"],
+        }
     return result
 
 
@@ -530,6 +541,12 @@ class Handler(BaseHTTPRequestHandler):
             deck = tarot_deck()
             card = deck[int(hashlib.sha256(f"{user_id}:{date.today().isoformat()}".encode()).hexdigest(), 16) % len(deck)]
             self.send_json(200, {"date": date.today().isoformat(), "card": card, "message": "Карта дня — повод для осознанного вопроса, а не готовый прогноз.", "disclaimer": TAROT_DISCLAIMER})
+        elif path.startswith("/api/tarot/arcana"):
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            birth_date = query.get("birthDate", [""])[0]
+            if not birth_date:
+                raise ValueError("birthDate is required")
+            self.send_json(200, {"birthDate": birth_date, "personalArcana": personal_arcana(birth_date)})
         elif path.startswith("/api/forecast/"):
             self.send_json(200, forecast({"birthDate": "1990-05-17"}, path.rsplit("/", 1)[-1]))
         else:
