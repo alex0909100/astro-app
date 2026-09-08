@@ -5,6 +5,7 @@ import hmac
 import json
 import mimetypes
 import os
+import random
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -88,6 +89,87 @@ ASPECT_MEANINGS = {
     "квадрат": "Есть внутреннее трение: результат появляется, когда человек переводит напряжение в конкретное действие.",
     "оппозиция": "Требуется баланс между двумя полюсами и умение учитывать как себя, так и другого.",
 }
+TAROT_DISCLAIMER = "Карты Таро — инструмент для размышления, а не окончательный приговор. Всё в ваших руках."
+TAROT_TOPICS = [
+    {"id": "feelings", "title": "Отношения · чувства партнёра", "question": "Что партнёр чувствует ко мне и какова истинная динамика между нами?"},
+    {"id": "future_relationship", "title": "Перспектива отношений", "question": "К чему приведут эти отношения и как они будут развиваться?"},
+    {"id": "loneliness", "title": "Почему нет отношений", "question": "Что мешает мне строить отношения и какой партнёр мне подходит?"},
+    {"id": "career", "title": "Карьера и работа", "question": "Какие перспективы у моей работы и что поможет профессиональному росту?"},
+    {"id": "business", "title": "Бизнес и финансы", "question": "Что важно учесть в новом направлении и какие ресурсы помогут делу?"},
+    {"id": "choice", "title": "Выбор между вариантами", "question": "Как осознанно сравнить варианты и какой критерий сейчас главный?"},
+    {"id": "money", "title": "Финансовое положение", "question": "Что мешает улучшить финансовую ситуацию и где находится мой ресурс?"},
+    {"id": "wellbeing", "title": "Самочувствие и баланс", "question": "Что поможет бережно поддержать мой ресурс и восстановить равновесие?"},
+    {"id": "advice", "title": "Ситуация и совет", "question": "Как мне поступить в сложной ситуации и что важно увидеть яснее?"},
+    {"id": "period", "title": "Общий расклад на период", "question": "Какие темы будут важны в ближайшие три месяца и на что направить внимание?"},
+]
+MAJOR_ARCANA = [
+    ("Шут", "новый цикл, свобода, открытость", "осторожность, хаос, страх шага"),
+    ("Маг", "инициатива, навыки, влияние", "манипуляция, рассеянность, сомнения"),
+    ("Верховная Жрица", "интуиция, тишина, скрытое знание", "закрытость, игнорирование интуиции"),
+    ("Императрица", "созидание, забота, изобилие", "застой, чрезмерная опека"),
+    ("Император", "структура, границы, ответственность", "жёсткость, контроль"),
+    ("Иерофант", "ценности, обучение, традиция", "догматизм, чужие правила"),
+    ("Влюблённые", "выбор, близость, согласие с собой", "сомнения, разрыв ценностей"),
+    ("Колесница", "воля, движение, собранность", "спешка, борьба направлений"),
+    ("Сила", "мягкая смелость, самообладание", "подавление, неуверенность"),
+    ("Отшельник", "поиск смысла, пауза, мудрость", "изоляция, избегание ответа"),
+    ("Колесо Фортуны", "поворот, цикл, шанс", "сопротивление переменам"),
+    ("Справедливость", "честность, последствия, баланс", "предвзятость, уход от ответственности"),
+    ("Повешенный", "новый взгляд, отпускание, пауза", "застревание, жертвенность"),
+    ("Смерть", "завершение этапа, трансформация", "цепляние за прошлое, страх перемен"),
+    ("Умеренность", "ритм, восстановление, соединение", "крайности, нетерпение"),
+    ("Дьявол", "желание, привязанность, честность с собой", "зависимость, иллюзия бессилия"),
+    ("Башня", "освобождение от ложного, резкая ясность", "сопротивление неизбежному"),
+    ("Звезда", "надежда, ориентир, вдохновение", "разочарование, потеря направления"),
+    ("Луна", "чувства, подсознание, неопределённость", "прояснение страхов, выход из тумана"),
+    ("Солнце", "ясность, энергия, радость", "завышенные ожидания, выгорание"),
+    ("Суд", "осознание, призвание, новый ответ", "самокритика, откладывание решения"),
+    ("Мир", "завершение, целостность, результат", "незакрытый цикл, рассеянность"),
+]
+MINOR_SUITS = {"Жезлы": "воля и действие", "Кубки": "чувства и отношения", "Мечи": "мысли и решения", "Пентакли": "ресурсы и практика"}
+TAROT_POSITIONS = [("Прошлое / корень ситуации", "Что сформировало текущий фон?"), ("Настоящее / суть вопроса", "Что происходит сейчас?"), ("Будущее / совет", "Куда направить внимание и какой шаг возможен?")]
+TAROT_UNSAFE_PATTERNS = (
+    "смерт", "умр", "катастроф", "беремен", "аборт", "рак", "диагноз",
+    "болезн", "лечен", "лекар", "инвестиц", "вложен", "кредит", "суд",
+    "адвокат", "юрид", "уголов", "ставк", "зависим"
+)
+TAROT_SAFETY_MESSAGE = "Карты не отвечают на вопросы о смерти, диагнозах, лечении, инвестициях и юридических решениях. Переформулируйте вопрос как безопасный вопрос для размышления о своих чувствах, границах или возможных шагах."
+
+
+def tarot_deck() -> list[dict]:
+    deck = [{"name": name, "arcana": "Старший Аркан", "upright": upright, "reversed": reversed_text} for name, upright, reversed_text in MAJOR_ARCANA]
+    for suit, theme in MINOR_SUITS.items():
+        for number in range(1, 11):
+            label = "Туз" if number == 1 else str(number)
+            deck.append({"name": f"{label} {suit}", "arcana": "Младший Аркан", "upright": f"начало и развитие темы {theme}", "reversed": f"задержка или переоценка темы {theme}"})
+        for court in ("Паж", "Рыцарь", "Королева", "Король"):
+            deck.append({"name": f"{court} {suit}", "arcana": "Младший Аркан", "upright": f"зрелое проявление: {theme}", "reversed": f"неуверенное или чрезмерное проявление: {theme}"})
+    return deck
+
+
+def tarot_interpretation(card: dict, position: str, question: str, reversed_card: bool) -> str:
+    meaning = card["reversed"] if reversed_card else card["upright"]
+    context = {
+        "Прошлое / корень ситуации": "Эта карта показывает опыт, привычку или решение, которые создали нынешний фон.",
+        "Настоящее / суть вопроса": "Она описывает центральную динамику вопроса и то, что сейчас важно заметить.",
+        "Будущее / совет": "Она не фиксирует судьбу, а подсказывает направление внимания и возможный осознанный шаг.",
+    }[position]
+    return f"Вопрос: «{question}». {context} {card['name']} ({'перевёрнутая' if reversed_card else 'прямая'}) говорит о теме «{meaning}». Практический фокус: назовите, что в этой теме зависит от вас, и выберите один небольшой шаг без давления на себя и других."
+
+
+def tarot_spread(payload: dict) -> dict:
+    topic = next((item for item in TAROT_TOPICS if item["id"] == payload.get("topicId")), TAROT_TOPICS[0])
+    question = (payload.get("question") or topic["question"]).strip()[:500]
+    lowered_question = question.casefold()
+    if any(pattern in lowered_question for pattern in TAROT_UNSAFE_PATTERNS):
+        raise ValueError(TAROT_SAFETY_MESSAGE)
+    deck = tarot_deck()
+    drawn = random.SystemRandom().sample(deck, 3)
+    cards = []
+    for card, (position, prompt) in zip(drawn, TAROT_POSITIONS):
+        reversed_card = bool(random.SystemRandom().getrandbits(1))
+        cards.append({"position": position, "positionPrompt": prompt, "name": card["name"], "arcana": card["arcana"], "reversed": reversed_card, "meaning": card["reversed"] if reversed_card else card["upright"], "interpretation": tarot_interpretation(card, position, question, reversed_card)})
+    return {"topic": topic, "question": question, "cards": cards, "summary": f"Расклад показывает три шага: сначала увидеть корень ситуации, затем честно назвать текущую динамику, а после выбрать действие, которое возвращает вам ясность и опору. Ответ не заменяет ваше решение.", "disclaimer": TAROT_DISCLAIMER}
 
 
 def read_data() -> dict:
@@ -342,6 +424,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"status": "ok", "service": "astro-app", "mode": "local"})
         elif path == "/api/config":
             self.send_json(200, {"telegram": bool(os.getenv("BOT_TOKEN")), "ai": bool(os.getenv("AI_API_KEY")), "stars": bool(os.getenv("BOT_TOKEN"))})
+        elif path == "/api/tarot/topics":
+            self.send_json(200, {"topics": TAROT_TOPICS, "disclaimer": TAROT_DISCLAIMER})
         elif path.startswith("/api/forecast/"):
             self.send_json(200, forecast({"birthDate": "1990-05-17"}, path.rsplit("/", 1)[-1]))
         else:
@@ -379,6 +463,27 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, chart)
             elif path == "/api/interpretation":
                 self.send_json(200, {"text": make_interpretation(payload["chart"], payload.get("kind", "day")), "cached": True})
+            elif path == "/api/tarot/spread":
+                user_id = str(payload.get("userId", "local"))
+                init_data = self.headers.get("X-Telegram-Init-Data", "")
+                telegram_user = validate_telegram_init_data(init_data) if init_data else {}
+                if telegram_user:
+                    user_id = str(telegram_user["id"])
+                data = read_data()
+                user = data["users"].setdefault(user_id, {"freeAttemptUsed": False, "subscription": None})
+                today = date.today().isoformat()
+                tarot_usage = user.setdefault("tarotUsage", {"date": today, "count": 0})
+                if tarot_usage.get("date") != today:
+                    tarot_usage = {"date": today, "count": 0}
+                    user["tarotUsage"] = tarot_usage
+                if tarot_usage["count"] >= 1 and not user.get("subscription"):
+                    self.send_json(402, {"error": "daily_tarot_limit", "message": "Бесплатный расклад на сегодня уже использован.", "disclaimer": TAROT_DISCLAIMER})
+                    return
+                spread = tarot_spread(payload)
+                tarot_usage["count"] += 1
+                user.setdefault("tarotHistory", []).append({"createdAt": datetime.utcnow().isoformat(), "spread": spread})
+                write_data(data)
+                self.send_json(200, spread)
             elif path == "/api/compatibility":
                 self.send_json(200, compatibility(payload["first"], payload["second"]))
             elif path == "/api/subscribe":

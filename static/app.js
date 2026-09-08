@@ -26,7 +26,7 @@ function showView(view) {
   document.querySelectorAll(".view").forEach((item) => item.classList.add("hidden"));
   $(`#view-${view}`).classList.remove("hidden");
   document.querySelectorAll(".bottom-nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
-  if (view === "chart") renderChart(); if (view === "numbers") renderNumbers(); if (view === "profile") renderProfile();
+  if (view === "chart") renderChart(); if (view === "numbers") renderNumbers(); if (view === "tarot") renderTarot(); if (view === "profile") renderProfile();
   window.scrollTo({top: 0, behavior: "smooth"});
 }
 
@@ -46,6 +46,36 @@ function renderNumbers() {
   const meanings = Object.entries(chart?.numberMeanings || {}).map(([key, item]) => `<details class="meaning-row"><summary><b>${item.title}</b><span>+</span></summary><p>${item.text}</p></details>`).join("");
   $("#view-numbers").innerHTML = chart ? `<div class="result-header"><p class="eyebrow">НУМЕРОЛОГИЯ</p><h2>Ваши ключи</h2><p>Дата ${chart.birthDate}${chart.nameNumber ? ` · ${escapeHtml(chart.place)}` : ""}</p></div><div class="stats-grid"><article class="stat-card accent"><small>ЧИСЛО ЖИЗНЕННОГО ПУТИ</small><strong>${chart.lifePath}</strong><p>Главный вектор опыта</p></article><article class="stat-card"><small>ЧИСЛО ДУШИ</small><strong>${chart.soulNumber}</strong><p>Внутренняя мотивация</p></article></div>${chart.nameNumber ? `<div class="card"><div class="section-heading"><span class="step">ИМЯ</span><h2>Число имени</h2></div><div class="big-number">${chart.nameNumber}</div><p>Звучание имени раскрывает способ проявления себя.</p></div>` : ""}<div class="card"><div class="section-heading"><span class="step">МАТРИЦА</span><h2>Квадрат Пифагора</h2></div><p class="explain-text">Количество цифр показывает, насколько заметно качество числа в дате. Ноль означает, что качество раскрывается через осознанную практику, а не автоматически.</p><div class="matrix">${Object.entries(chart.matrix).map(([key, value]) => `<div class="matrix-cell"><small>${key}</small><strong>${value || "—"}</strong></div>`).join("")}</div></div><div class="card"><div class="section-heading"><span class="step">СПРАВКА</span><h2>Что означает каждая цифра</h2></div>${meanings}</div><div class="disclaimer">${chart.disclaimer}</div>` : `<div class="empty card"><h2>Откройте свои числа</h2><p>Сначала постройте натальную карту.</p></div>`;
 }
+
+function renderTarot() {
+  const target = $("#view-tarot");
+  target.innerHTML = `<div class="result-header"><p class="eyebrow">ТАРО · ОСОЗНАННЫЙ РАСКЛАД</p><h2>Задайте вопрос картам</h2><p>Карты не выносят приговоров: они помогают увидеть ситуацию с другой стороны.</p></div><div class="card tarot-form"><div class="section-heading"><span class="step">01</span><h2>Выберите тему</h2></div><div id="tarot-topics" class="tarot-topics"><span class="muted">Загрузка тем…</span></div><label>Ваш вопрос<textarea id="tarot-question" rows="4" placeholder="Сформулируйте вопрос конкретно и про себя"></textarea></label><button class="primary-button" id="tarot-draw">Перемешать и вытянуть 3 карты <span>✦</span></button><p class="hint">Бесплатно доступен 1 расклад в день. Подписка снимает дневной лимит.</p></div><div id="tarot-result"></div><div class="disclaimer">Карты Таро — это инструмент для размышления, а не окончательный приговор. Всё в ваших руках.</div>`;
+  fetch("/api/tarot/topics").then((response) => response.json()).then((data) => {
+    $("#tarot-topics").innerHTML = data.topics.map((topic, index) => `<button class="tarot-topic ${index === 0 ? "selected" : ""}" data-topic="${topic.id}" data-question="${escapeHtml(topic.question)}">${escapeHtml(topic.title)}</button>`).join("");
+    document.querySelectorAll(".tarot-topic").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll(".tarot-topic").forEach((item) => item.classList.remove("selected")); button.classList.add("selected");
+      $("#tarot-question").value = button.dataset.question;
+    }));
+    $("#tarot-question").value = data.topics[0].question;
+  });
+  $("#tarot-draw").addEventListener("click", drawTarot);
+}
+
+async function drawTarot() {
+  const button = $("#tarot-draw"); const topic = document.querySelector(".tarot-topic.selected");
+  button.disabled = true; button.innerHTML = "Колода перемешивается <span>✦</span>";
+  const response = await apiFetch("/api/tarot/spread", {method: "POST", body: JSON.stringify({userId: state.userId, topicId: topic?.dataset.topic, question: $("#tarot-question").value})});
+  const data = await response.json();
+  button.disabled = false; button.innerHTML = "Перемешать и вытянуть 3 карты <span>✦</span>";
+  if (!response.ok) {
+    const isLimit = data.error === "daily_tarot_limit";
+    $("#tarot-result").innerHTML = `<div class="card locked"><h2>${isLimit ? "Расклад на сегодня уже использован" : "Расклад недоступен"}</h2><p>${escapeHtml(data.message || "Не удалось выполнить расклад.")}</p>${isLimit ? '<button class="primary-button" onclick="showView(\'profile\')">Открыть подписку</button>' : ""}</div>`;
+    return;
+  }
+  $("#tarot-result").innerHTML = `<div class="tarot-spread"><div class="section-heading"><span class="step">02</span><h2>${escapeHtml(data.topic.title)}</h2></div><p class="tarot-question">«${escapeHtml(data.question)}»</p><div class="tarot-cards">${data.cards.map((card) => `<article class="tarot-card"><div class="tarot-card-inner"><div class="tarot-back">✦<small>ASTRO TAROT</small></div><div class="tarot-front"><span>${card.reversed ? "↺" : "✦"}</span><strong>${escapeHtml(card.name)}</strong><small>${card.reversed ? "ПЕРЕВЁРНУТАЯ" : "ПРЯМАЯ"}</small></div></div><h3>${escapeHtml(card.position)}</h3><p class="muted">${escapeHtml(card.positionPrompt)}</p><p>${escapeHtml(card.interpretation)}</p></article>`).join("")}</div><div class="card tarot-summary"><div class="section-heading"><span class="step">03</span><h2>Общий итог</h2></div><p>${escapeHtml(data.summary)}</p><p class="muted">${data.disclaimer}</p></div><button class="secondary-button" onclick="shareTarot()">Поделиться раскладом ↗</button></div>`;
+}
+
+async function shareTarot() { const text = "Мой расклад Таро в Astro App помогает посмотреть на ситуацию с другой стороны."; if (navigator.share) await navigator.share({title: "Мой расклад Таро", text}); else await navigator.clipboard.writeText(text); }
 
 function renderProfile() {
   $("#view-profile").innerHTML = `<div class="result-header"><p class="eyebrow">ПРОФИЛЬ</p><h2>Ваше пространство</h2><p>ID: ${state.userId.slice(0, 8)}…</p></div><div class="card subscription-card"><div class="section-heading"><span class="step">✦</span><h2>${state.subscription ? "Подписка активна" : "Полный доступ"}</h2></div><p>${state.subscription ? `Доступ до ${new Date(state.subscription.expiresAt).toLocaleDateString("ru-RU")}.` : "Ежедневный прогноз, утренняя подсказка и все отчёты без ограничений."}</p>${state.subscription ? `<span class="pill">АКТИВНА</span>` : `<button class="primary-button" id="subscribe-button">Оформить · 300 Stars</button>`}</div><div class="card"><div class="section-heading"><span class="step">♡</span><h2>Совместимость</h2></div><p class="muted">Сравните число жизненного пути двух людей.</p><div class="compatibility-form"><input id="compat-date" type="date"><button class="secondary-button" id="compat-button">Сравнить карты →</button></div><div id="compat-result"></div></div><div class="card"><div class="section-heading"><span class="step">⚙</span><h2>Приватность</h2></div><p class="muted">Данные хранятся локально в демо-режиме. В production профиль шифруется и привязывается к Telegram.</p><button class="secondary-button danger" id="delete-button">Удалить все данные</button></div><div class="disclaimer">${state.chart?.disclaimer || "Вся информация носит развлекательный характер и не является профессиональной консультацией."}</div>`;
