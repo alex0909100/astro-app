@@ -23,6 +23,18 @@ python app.py
 - удаление пользовательских данных;
 - endpoint `/api/geocode` с Nominatim;
 - endpoint `/api/compatibility`.
+- раздел «Таро»: полная колода 78 карт, схемы «Три карты», «Кельтский крест» и «Выбор»;
+- персональные Арканы Личности, Судьбы и Дополнительный по дате рождения;
+- «Карта дня», история раскладов и структурированный AI-prompt с учётом позиций, перевёрнутых карт и сочетаний.
+
+### Tarot API
+
+- `GET /api/tarot/topics` — темы, схемы раскладов и доступные дизайны колоды;
+- `POST /api/tarot/spread` — `topicId`, `spreadType`, `question`, `userId`; возвращает карты, персональные Арканы и prompt;
+- `GET /api/tarot/card-of-day?userId=...` — стабильная карта дня;
+- `GET /api/tarot/history?userId=...` — история раскладов пользователя.
+
+Карточка карты хранит `id`, `number`, `suit`, `arcana`, `element`, краткие и полные значения для прямого и перевёрнутого положения. В production эти поля следует перенести в таблицы `tarot_cards`, `tarot_spreads`, `tarot_spread_cards`, `personal_arcana` и `tarot_readings` PostgreSQL; текущий MVP сохраняет историю в `astro_data.json`.
 
 ## Запуск в Telegram
 

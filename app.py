@@ -128,6 +128,33 @@ MAJOR_ARCANA = [
 ]
 MINOR_SUITS = {"Жезлы": "воля и действие", "Кубки": "чувства и отношения", "Мечи": "мысли и решения", "Пентакли": "ресурсы и практика"}
 TAROT_POSITIONS = [("Прошлое / корень ситуации", "Что сформировало текущий фон?"), ("Настоящее / суть вопроса", "Что происходит сейчас?"), ("Будущее / совет", "Куда направить внимание и какой шаг возможен?")]
+TAROT_SPREADS = {
+    "three": {
+        "title": "Три карты",
+        "description": "Прошлое — Настоящее — Будущее / совет",
+        "positions": TAROT_POSITIONS,
+    },
+    "celtic_cross": {
+        "title": "Кельтский крест",
+        "description": "Глубокий анализ ситуации десятью позициями",
+        "positions": [
+            ("Суть ситуации", "Что происходит сейчас?"), ("Перекрёсток", "Что помогает или препятствует?"),
+            ("Основание", "Какой корень у ситуации?"), ("Прошлое", "Что уже повлияло на неё?"),
+            ("Цель", "К чему вы стремитесь сознательно?"), ("Ближайшее развитие", "Какой следующий этап вероятен?"),
+            ("Ваша позиция", "Как вы входите в ситуацию?"), ("Внешняя среда", "Как влияют другие люди и обстоятельства?"),
+            ("Надежды и опасения", "Чего вы ждёте или избегаете?"), ("Итог / совет", "Какой вывод и шаг наиболее осознанны?"),
+        ],
+    },
+    "choice": {
+        "title": "Выбор",
+        "description": "Сравнение двух вариантов без фатального вердикта",
+        "positions": [
+            ("Суть выбора", "Что на самом деле нужно решить?"), ("Вариант A", "Ресурс и цена первого варианта"),
+            ("Вариант B", "Ресурс и цена второго варианта"), ("Критерий выбора", "Что важно проверить перед решением?"),
+            ("Совет", "Как сохранить свободу выбора и ясность?"),
+        ],
+    },
+}
 TAROT_UNSAFE_PATTERNS = (
     "смерт", "умр", "катастроф", "беремен", "аборт", "рак", "диагноз",
     "болезн", "лечен", "лекар", "инвестиц", "вложен", "кредит", "суд",
@@ -137,24 +164,66 @@ TAROT_SAFETY_MESSAGE = "Карты не отвечают на вопросы о 
 
 
 def tarot_deck() -> list[dict]:
-    deck = [{"name": name, "arcana": "Старший Аркан", "upright": upright, "reversed": reversed_text} for name, upright, reversed_text in MAJOR_ARCANA]
+    major_numbers = {name: index + 1 for index, (name, _, _) in enumerate(MAJOR_ARCANA)}
+    deck = [{
+        "id": f"major-{number}", "name": name, "number": number, "suit": None,
+        "arcana": "Старший Аркан", "element": "дух",
+        "shortUpright": upright.split(",")[0], "fullUpright": upright,
+        "shortReversed": reversed_text.split(",")[0], "fullReversed": reversed_text,
+        "upright": upright, "reversed": reversed_text,
+    } for name, upright, reversed_text in MAJOR_ARCANA for number in [major_numbers[name]]]
     for suit, theme in MINOR_SUITS.items():
         for number in range(1, 11):
             label = "Туз" if number == 1 else str(number)
-            deck.append({"name": f"{label} {suit}", "arcana": "Младший Аркан", "upright": f"начало и развитие темы {theme}", "reversed": f"задержка или переоценка темы {theme}"})
+            element = {"Жезлы": "огонь", "Кубки": "вода", "Мечи": "воздух", "Пентакли": "земля"}[suit]
+            deck.append({"id": f"minor-{suit}-{number}", "name": f"{label} {suit}", "number": number, "suit": suit, "arcana": "Младший Аркан", "element": element, "shortUpright": f"{theme}", "fullUpright": f"начало и развитие темы {theme}", "shortReversed": f"блок {theme}", "fullReversed": f"задержка или переоценка темы {theme}", "upright": f"начало и развитие темы {theme}", "reversed": f"задержка или переоценка темы {theme}"})
         for court in ("Паж", "Рыцарь", "Королева", "Король"):
-            deck.append({"name": f"{court} {suit}", "arcana": "Младший Аркан", "upright": f"зрелое проявление: {theme}", "reversed": f"неуверенное или чрезмерное проявление: {theme}"})
+            element = {"Жезлы": "огонь", "Кубки": "вода", "Мечи": "воздух", "Пентакли": "земля"}[suit]
+            deck.append({"id": f"minor-{suit}-{court}", "name": f"{court} {suit}", "number": court, "suit": suit, "arcana": "Младший Аркан", "element": element, "shortUpright": theme, "fullUpright": f"зрелое проявление: {theme}", "shortReversed": f"дисбаланс: {theme}", "fullReversed": f"неуверенное или чрезмерное проявление: {theme}", "upright": f"зрелое проявление: {theme}", "reversed": f"неуверенное или чрезмерное проявление: {theme}"})
     return deck
 
 
-def tarot_interpretation(card: dict, position: str, question: str, reversed_card: bool) -> str:
-    meaning = card["reversed"] if reversed_card else card["upright"]
+def personal_arcana(birth_date: str) -> dict:
+    parsed = date.fromisoformat(birth_date)
+    cards = tarot_deck()
+    by_number = {card["number"]: card for card in cards if card["arcana"] == "Старший Аркан"}
+    def reduce_arcana(value: int) -> int:
+        while value > 22:
+            value -= 22
+        return value or 22
+    personality = reduce_arcana(parsed.day)
+    destiny = reduce_arcana(sum(int(char) for char in birth_date if char.isdigit()))
+    additional = reduce_arcana(sum(int(char) for char in f"{parsed.month:02d}{parsed.year:04d}"))
+    result = {}
+    for key, number in (("personality", personality), ("destiny", destiny), ("additional", additional)):
+        card = by_number[number]
+        result[key] = {"number": number, "name": card["name"], "description": card["fullUpright"], "light": card["shortUpright"], "shadow": card["shortReversed"]}
+    return result
+
+
+def build_tarot_prompt(question: str, spread: str, cards: list[dict], arcana: dict | None) -> str:
+    return (
+        "Ты бережный консультант по Таро. Это инструмент саморефлексии, не предсказание. "
+        "Не делай фатальных выводов и не давай медицинских, финансовых или юридических рекомендаций. "
+        f"Вопрос: {question}\nСхема: {TAROT_SPREADS[spread]['title']}\n"
+        f"Персональные Арканы: {json.dumps(arcana or {}, ensure_ascii=False)}\n"
+        f"Карты по позициям: {json.dumps(cards, ensure_ascii=False)}\n"
+        "Для каждой карты учти положение, значение позиции и взаимодействие с соседними картами. "
+        "Затем дай прямой, но вероятностный ответ на вопрос, общий итог и 2-3 практичных шага. "
+        "Верни JSON: cardInterpretations, interactions, answer, summary, recommendations."
+    )
+
+
+def tarot_interpretation(card: dict, position: str, question: str, reversed_card: bool, index: int, cards: list[dict]) -> str:
+    meaning = card["fullReversed"] if reversed_card else card["fullUpright"]
     context = {
         "Прошлое / корень ситуации": "Эта карта показывает опыт, привычку или решение, которые создали нынешний фон.",
         "Настоящее / суть вопроса": "Она описывает центральную динамику вопроса и то, что сейчас важно заметить.",
         "Будущее / совет": "Она не фиксирует судьбу, а подсказывает направление внимания и возможный осознанный шаг.",
-    }[position]
-    return f"Вопрос: «{question}». {context} {card['name']} ({'перевёрнутая' if reversed_card else 'прямая'}) говорит о теме «{meaning}». Практический фокус: назовите, что в этой теме зависит от вас, и выберите один небольшой шаг без давления на себя и других."
+    }.get(position, f"В позиции «{position}» карта раскрывает отдельный слой вопроса и помогает увидеть его без фатальных выводов.")
+    neighbors = [item["name"] for item in cards[max(0, index - 1):index] + cards[index + 1:index + 2]]
+    relation = f"В сочетании с {', '.join(neighbors)} карта уточняет общий контекст расклада." if neighbors else "Карта задаёт основной тон расклада."
+    return f"Вопрос: «{question}». {context} {card['name']} ({'перевёрнутая' if reversed_card else 'прямая'}) раскрывает тему «{meaning}». {relation} Практический фокус: выберите один небольшой шаг, который зависит от вас."
 
 
 def tarot_spread(payload: dict) -> dict:
@@ -163,13 +232,18 @@ def tarot_spread(payload: dict) -> dict:
     lowered_question = question.casefold()
     if any(pattern in lowered_question for pattern in TAROT_UNSAFE_PATTERNS):
         raise ValueError(TAROT_SAFETY_MESSAGE)
+    spread_id = payload.get("spreadType", "three")
+    spread = TAROT_SPREADS.get(spread_id, TAROT_SPREADS["three"])
     deck = tarot_deck()
-    drawn = random.SystemRandom().sample(deck, 3)
+    drawn = random.SystemRandom().sample(deck, len(spread["positions"]))
+    arcana = personal_arcana(payload["birthDate"]) if payload.get("birthDate") else None
     cards = []
-    for card, (position, prompt) in zip(drawn, TAROT_POSITIONS):
+    for index, (card, (position, prompt)) in enumerate(zip(drawn, spread["positions"])):
         reversed_card = bool(random.SystemRandom().getrandbits(1))
-        cards.append({"position": position, "positionPrompt": prompt, "name": card["name"], "arcana": card["arcana"], "reversed": reversed_card, "meaning": card["reversed"] if reversed_card else card["upright"], "interpretation": tarot_interpretation(card, position, question, reversed_card)})
-    return {"topic": topic, "question": question, "cards": cards, "summary": f"Расклад показывает три шага: сначала увидеть корень ситуации, затем честно назвать текущую динамику, а после выбрать действие, которое возвращает вам ясность и опору. Ответ не заменяет ваше решение.", "disclaimer": TAROT_DISCLAIMER}
+        cards.append({"position": position, "positionPrompt": prompt, **{key: card[key] for key in ("id", "name", "number", "suit", "arcana", "element")}, "reversed": reversed_card, "meaning": card["fullReversed"] if reversed_card else card["fullUpright"]})
+    for index, item in enumerate(cards):
+        item["interpretation"] = tarot_interpretation(drawn[index], item["position"], question, item["reversed"], index, cards)
+    return {"topic": topic, "spread": {"id": spread_id, "title": spread["title"], "description": spread["description"]}, "question": question, "cards": cards, "personalArcana": arcana, "aiPrompt": build_tarot_prompt(question, spread_id, cards, arcana), "summary": "Карты показывают возможные акценты и взаимосвязи, а не фиксированный исход. Итоговое решение и ответственность остаются у вас.", "disclaimer": TAROT_DISCLAIMER}
 
 
 def read_data() -> dict:
@@ -342,6 +416,7 @@ def calculate(payload: dict) -> dict:
     return {
         "birthDate": payload["birthDate"], "birthTime": payload.get("birthTime") or "не указано",
         "place": place, "zodiac": sign, "lifePath": path,
+        "personalArcana": personal_arcana(payload["birthDate"]),
         "soulNumber": reduce_number(sum(int(char) for char in payload["birthDate"].replace("-", ""))),
         "nameNumber": name_number(payload.get("fullName", "")) if payload.get("fullName") else None,
         "matrix": matrix, "planets": positions, "aspects": aspects,
@@ -425,7 +500,18 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/config":
             self.send_json(200, {"telegram": bool(os.getenv("BOT_TOKEN")), "ai": bool(os.getenv("AI_API_KEY")), "stars": bool(os.getenv("BOT_TOKEN"))})
         elif path == "/api/tarot/topics":
-            self.send_json(200, {"topics": TAROT_TOPICS, "disclaimer": TAROT_DISCLAIMER})
+            self.send_json(200, {"topics": TAROT_TOPICS, "spreads": TAROT_SPREADS, "decks": ["classic", "midnight", "gold"], "disclaimer": TAROT_DISCLAIMER})
+        elif path.startswith("/api/tarot/history"):
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            user_id = query.get("userId", ["local"])[0]
+            data = read_data()
+            self.send_json(200, {"history": data["users"].get(str(user_id), {}).get("tarotHistory", [])})
+        elif path.startswith("/api/tarot/card-of-day"):
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            user_id = query.get("userId", ["local"])[0]
+            deck = tarot_deck()
+            card = deck[int(hashlib.sha256(f"{user_id}:{date.today().isoformat()}".encode()).hexdigest(), 16) % len(deck)]
+            self.send_json(200, {"date": date.today().isoformat(), "card": card, "message": "Карта дня — повод для осознанного вопроса, а не готовый прогноз.", "disclaimer": TAROT_DISCLAIMER})
         elif path.startswith("/api/forecast/"):
             self.send_json(200, forecast({"birthDate": "1990-05-17"}, path.rsplit("/", 1)[-1]))
         else:
@@ -479,6 +565,8 @@ class Handler(BaseHTTPRequestHandler):
                 if tarot_usage["count"] >= 1 and not user.get("subscription"):
                     self.send_json(402, {"error": "daily_tarot_limit", "message": "Бесплатный расклад на сегодня уже использован.", "disclaimer": TAROT_DISCLAIMER})
                     return
+                if user.get("chart", {}).get("birthDate"):
+                    payload["birthDate"] = user["chart"]["birthDate"]
                 spread = tarot_spread(payload)
                 tarot_usage["count"] += 1
                 user.setdefault("tarotHistory", []).append({"createdAt": datetime.utcnow().isoformat(), "spread": spread})

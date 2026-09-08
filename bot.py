@@ -103,7 +103,13 @@ async def notification_loop(bot: Bot) -> None:
                     subscription = user.get("subscription") or {}
                     telegram_id = user.get("telegramId")
                     if telegram_id and subscription.get("status") == "active":
-                        await bot.send_message(telegram_id, "✦ Ваша утренняя подсказка готова. Откройте Astro App.", reply_markup=app_keyboard())
+                        card = {"name": "Карта дня"}
+                        try:
+                            with urllib.request.urlopen(f"{APP_API_URL}/api/tarot/card-of-day?userId={telegram_id}", timeout=10) as response:
+                                card = json.loads(response.read()).get("card", card)
+                        except (OSError, ValueError, KeyError):
+                            pass
+                        await bot.send_message(telegram_id, f"✦ Карта дня: {card['name']}\n{card.get('shortUpright', 'Откройте приложение для подробностей.')}", reply_markup=app_keyboard())
         except Exception:
             pass
         await asyncio.sleep(86400)
