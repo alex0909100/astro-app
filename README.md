@@ -70,7 +70,21 @@ Telegram принимает Mini App только по HTTPS (кроме спе�
 6. использовать Fernet/AES для профилей и HTTPS;
 7. запустить ежедневный worker уведомлений.
 
-Переменные окружения: `BOT_TOKEN`, `AI_API_KEY`, `DATABASE_URL`, `ENCRYPTION_KEY`, `PORT`.
+Переменные окружения: `BOT_TOKEN`, `DATABASE_URL`, `ENCRYPTION_KEY`, `PORT`.
+
+### YandexGPT
+
+Интерпретации натальной карты, нумерологии и Таро генерируются на backend через YandexGPT. Добавьте в Railway Variables:
+
+```env
+YANDEX_API_KEY=ключ_API_из_Yandex_Cloud
+YANDEX_FOLDER_ID=id_каталога
+YANDEX_MODEL_URI=gpt://id_каталога/yandexgpt/latest
+YANDEXGPT_TEMPERATURE=0.55
+YANDEXGPT_MAX_TOKENS=1800
+```
+
+Ключ не передаётся во frontend и не должен попадать в Git. Если переменные не заданы, приложение использует безопасный локальный fallback и продолжает работать. Повторные запросы с одинаковыми исходными данными берутся из кеша `interpretations`.
 
 ### Админ-панель
 

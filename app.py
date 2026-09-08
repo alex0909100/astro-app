@@ -304,6 +304,50 @@ def telegram_api(method: str, payload: dict) -> dict:
     return result
 
 
+def yandexgpt_generate(system_prompt: str, user_prompt: str) -> str:
+    api_key = os.getenv("YANDEX_API_KEY") or os.getenv("YANDEXGPT_API_KEY")
+    folder_id = os.getenv("YANDEX_FOLDER_ID")
+    if not api_key or not folder_id:
+        raise ValueError("YANDEX_API_KEY and YANDEX_FOLDER_ID are required")
+    request = urllib.request.Request(
+        "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
+        data=json.dumps({
+            "modelUri": os.getenv("YANDEX_MODEL_URI", f"gpt://{folder_id}/yandexgpt/latest").replace("<folder_id>", folder_id),
+            "completionOptions": {
+                "stream": False,
+                "temperature": float(os.getenv("YANDEXGPT_TEMPERATURE", "0.55")),
+                "maxTokens": int(os.getenv("YANDEXGPT_MAX_TOKENS", "1800")),
+            },
+            "messages": [{"role": "system", "text": system_prompt}, {"role": "user", "text": user_prompt}],
+        }, ensure_ascii=False).encode(),
+        headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=45) as response:
+        result = json.loads(response.read())
+    alternatives = result.get("result", {}).get("alternatives", [])
+    if not alternatives or not alternatives[0].get("message", {}).get("text"):
+        raise ValueError("YandexGPT returned an empty response")
+    return alternatives[0]["message"]["text"].strip()
+
+
+AI_SYSTEM_PROMPT = (
+    "Ты — бережный русскоязычный консультант Astro App. Пиши конкретно, структурированно и без эзотерической воды. "
+    "Это развлекательная саморефлексия, не медицинская, финансовая или юридическая консультация. "
+    "Не делай фатальных предсказаний; подчёркивай свободу выбора пользователя."
+)
+
+
+def cache_ai_text(cache_key: str, system_prompt: str, user_prompt: str) -> tuple[str, bool]:
+    data = read_data()
+    key = f"yandexgpt:v1:{cache_key}"
+    if key in data.setdefault("interpretations", {}):
+        return data["interpretations"][key], True
+    text = yandexgpt_generate(system_prompt, user_prompt)
+    data["interpretations"][key] = text
+    write_data(data)
+    return text, False
+
+
 def require_admin(handler: BaseHTTPRequestHandler) -> dict:
     configured_ids = {
         value.strip() for value in (
@@ -334,7 +378,7 @@ def user_is_active(user: dict, cutoff: datetime) -> bool:
         return False
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None) >= cutoff
-    except ValueError:
+    except (ValueError, OSError, json.JSONDecodeError):
         return False
 
 
@@ -541,14 +585,34 @@ def compatibility(first: dict, second: dict) -> dict:
 
 
 def make_interpretation(chart: dict, kind: str) -> str:
-    data = read_data()
-    cache_key = hashlib.sha256(json.dumps([chart, kind], sort_keys=True).encode()).hexdigest()
-    if cache_key in data["interpretations"]:
-        return data["interpretations"][cache_key]
-    text = f"{chart['interpretation']} Формат: {kind}. Это подсказка для саморефлексии, а не предсказание."
-    data["interpretations"][cache_key] = text
-    write_data(data)
-    return text
+    cache_key = hashlib.sha256(json.dumps([chart, kind], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    user_prompt = (
+        f"Тип ответа: {kind}. Данные пользователя в JSON:\n{json.dumps(chart, ensure_ascii=False)}\n\n"
+        "Составь ответ на русском в формате: краткий вывод; 3-5 конкретных наблюдений; "
+        "3 практических шага. Для натальной карты свяжи планеты, знаки, дома и аспекты. "
+        "Для нумерологии объясни жизненный путь, число души, имя и психоматрицу."
+    )
+    try:
+        return cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)[0]
+    except (ValueError, OSError, json.JSONDecodeError):
+        return f"{chart['interpretation']} Формат: {kind}. Это подсказка для саморефлексии, а не предсказание."
+
+
+def tarot_ai_interpretation(spread: dict) -> tuple[str, bool]:
+    cache_key = hashlib.sha256(json.dumps(spread, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    user_prompt = (
+        f"Вопрос пользователя: {spread['question']}\n"
+        f"Схема: {spread['spread']['title']}\n"
+        f"Карты по позициям:\n{json.dumps(spread['cards'], ensure_ascii=False)}\n"
+        f"Персональные Арканы:\n{json.dumps(spread.get('personalArcana'), ensure_ascii=False)}\n\n"
+        "Дай краткую, но содержательную интерпретацию: по 1-2 предложения на карту с учётом позиции "
+        "и прямого/перевёрнутого положения; затем взаимосвязь карт, прямой ответ на вопрос и 2 практических шага. "
+        "Не предсказывай смерть, болезни или гарантированный исход."
+    )
+    try:
+        return cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)
+    except ValueError:
+        return spread["summary"], False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -578,7 +642,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             self.send_json(200, {"status": "ok", "service": "astro-app", "mode": "local"})
         elif path == "/api/config":
-            self.send_json(200, {"telegram": bool(os.getenv("BOT_TOKEN")), "ai": bool(os.getenv("AI_API_KEY")), "stars": bool(os.getenv("BOT_TOKEN"))})
+            yandex_ready = bool((os.getenv("YANDEX_API_KEY") or os.getenv("YANDEXGPT_API_KEY")) and os.getenv("YANDEX_FOLDER_ID"))
+            self.send_json(200, {"telegram": bool(os.getenv("BOT_TOKEN")), "ai": yandex_ready, "aiProvider": "YandexGPT" if yandex_ready else None, "stars": bool(os.getenv("BOT_TOKEN"))})
         elif path == "/api/tarot/topics":
             self.send_json(200, {"topics": TAROT_TOPICS, "spreads": TAROT_SPREADS, "decks": ["classic", "midnight", "gold"], "disclaimer": TAROT_DISCLAIMER})
         elif path.startswith("/api/tarot/history"):
@@ -761,6 +826,7 @@ class Handler(BaseHTTPRequestHandler):
                 if user.get("chart", {}).get("birthDate"):
                     payload["birthDate"] = user["chart"]["birthDate"]
                 spread = tarot_spread(payload)
+                spread["aiInterpretation"], spread["aiCached"] = tarot_ai_interpretation(spread)
                 tarot_usage["count"] += 1
                 user.setdefault("tarotHistory", []).append({"createdAt": datetime.utcnow().isoformat(), "spread": spread})
                 write_data(data)
