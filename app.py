@@ -349,13 +349,7 @@ def cache_ai_text(cache_key: str, system_prompt: str, user_prompt: str) -> tuple
 
 
 def require_admin(handler: BaseHTTPRequestHandler) -> dict:
-    configured_ids = {
-        value.strip() for value in (
-            os.getenv("ADMIN_TELEGRAM_ID", "") + "," + os.getenv("ADMIN_TELEGRAM_IDS", "")
-        ).split(",") if value.strip()
-    }
-    data = read_data()
-    configured_ids.update(str(value) for value in data.get("admins", {}).keys())
+    configured_ids = admin_ids()
     if not configured_ids:
         raise ValueError("ADMIN_TELEGRAM_ID is not configured")
     init_data = handler.headers.get("X-Telegram-Init-Data", "")
@@ -363,6 +357,32 @@ def require_admin(handler: BaseHTTPRequestHandler) -> dict:
     if str(user.get("id")) not in configured_ids:
         raise PermissionError("Admin access denied")
     return user
+
+
+def admin_ids() -> set[str]:
+    configured_ids = {
+        value.strip() for value in (
+            os.getenv("ADMIN_TELEGRAM_ID", "") + "," + os.getenv("ADMIN_TELEGRAM_IDS", "")
+        ).split(",") if value.strip()
+    }
+    configured_ids.update(str(value) for value in read_data().get("admins", {}).keys())
+    return configured_ids
+
+
+def is_active_subscription(subscription: dict | None) -> bool:
+    if not subscription or subscription.get("status") != "active":
+        return False
+    if subscription.get("permanent"):
+        return True
+    try:
+        expires = datetime.fromisoformat((subscription.get("expiresAt") or "1970-01-01").replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return False
+    return expires > datetime.utcnow()
+
+
+def admin_subscription() -> dict:
+    return {"plan": "admin", "status": "active", "permanent": True, "paymentMode": "admin"}
 
 
 def record_admin_action(data: dict, admin_id: str, action: str, target_id: str = "", details: dict | None = None) -> None:
@@ -685,11 +705,7 @@ class Handler(BaseHTTPRequestHandler):
             vip = []
             for user in users:
                 subscription = user.get("subscription") or {}
-                try:
-                    expires = datetime.fromisoformat((subscription.get("expiresAt") or "1970-01-01").replace("Z", "+00:00")).replace(tzinfo=None)
-                except ValueError:
-                    expires = datetime.min
-                if subscription.get("status") == "active" and expires > datetime.utcnow():
+                if is_active_subscription(subscription):
                     vip.append(user)
             self.send_json(200, {"totalUsers": len(users), "activeUsers": sum(user_is_active(u, cutoff) for u in users), "vipUsers": len(vip), "registrations": [{"date": day, "count": count} for day, count in sorted(registrations.items())], "adminId": str(admin["id"])})
         elif path == "/admin/users":
@@ -712,7 +728,7 @@ class Handler(BaseHTTPRequestHandler):
                 if search and search not in f"{user_id} {user.get('username', '')} {user.get('firstName', '')}".casefold():
                     continue
                 subscription = user.get("subscription") or {}
-                is_vip = subscription.get("status") == "active" and (subscription.get("expiresAt") or "") > datetime.utcnow().isoformat()
+                is_vip = is_active_subscription(subscription)
                 is_active = user_is_active(user, cutoff)
                 if vip_filter in ("true", "false") and is_vip != (vip_filter == "true"):
                     continue
@@ -781,7 +797,9 @@ class Handler(BaseHTTPRequestHandler):
                     user["telegramId"] = telegram_user["id"]
                     user["firstName"] = telegram_user.get("first_name", "")
                     user["username"] = telegram_user.get("username", "")
-                if user["freeAttemptUsed"] and not user.get("subscription"):
+                if telegram_user and str(telegram_user["id"]) in admin_ids():
+                    user["subscription"] = admin_subscription()
+                if user["freeAttemptUsed"] and not is_active_subscription(user.get("subscription")):
                     chart["locked"] = True
                 user["freeAttemptUsed"] = True
                 user["chart"] = chart
@@ -815,12 +833,15 @@ class Handler(BaseHTTPRequestHandler):
                     user_id = str(telegram_user["id"])
                 data = read_data()
                 user = data["users"].setdefault(user_id, {"freeAttemptUsed": False, "subscription": None})
+                is_admin_user = bool(telegram_user and str(telegram_user["id"]) in admin_ids())
+                if is_admin_user:
+                    user["subscription"] = admin_subscription()
                 today = date.today().isoformat()
                 tarot_usage = user.setdefault("tarotUsage", {"date": today, "count": 0})
                 if tarot_usage.get("date") != today:
                     tarot_usage = {"date": today, "count": 0}
                     user["tarotUsage"] = tarot_usage
-                if tarot_usage["count"] >= 1 and not user.get("subscription"):
+                if tarot_usage["count"] >= 1 and not is_admin_user and not is_active_subscription(user.get("subscription")):
                     self.send_json(402, {"error": "daily_tarot_limit", "message": "Бесплатный расклад на сегодня уже использован.", "disclaimer": TAROT_DISCLAIMER})
                     return
                 if user.get("chart", {}).get("birthDate"):
@@ -885,12 +906,15 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("User not found")
                 user = data["users"][target]
                 enabled = bool(payload.get("vip", True))
+                target_is_admin = target in admin_ids()
                 if enabled:
                     days = max(1, min(int(payload.get("days", 30)), 3650))
-                    user["subscription"] = {"plan": "admin", "status": "active", "expiresAt": (datetime.utcnow() + timedelta(days=days)).isoformat(), "paymentMode": "admin"}
+                    user["subscription"] = admin_subscription() if target_is_admin else {"plan": "admin", "status": "active", "expiresAt": (datetime.utcnow() + timedelta(days=days)).isoformat(), "paymentMode": "admin"}
                     action = "vip_granted"
-                    message = str(payload.get("message") or f"Вам активирован VIP-доступ на {days} дней.")
+                    message = str(payload.get("message") or ("Вам активирован постоянный VIP-доступ администратора." if target_is_admin else f"Вам активирован VIP-доступ на {days} дней."))
                 else:
+                    if target_is_admin:
+                        raise ValueError("VIP-доступ администратора нельзя отключить")
                     user["subscription"] = None
                     action = "vip_revoked"
                     message = str(payload.get("message") or "Ваш VIP-доступ отключён.")
