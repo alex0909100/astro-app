@@ -223,7 +223,8 @@ def personal_arcana(birth_date: str) -> dict:
         result[key] = {
             "number": number,
             "name": card["name"],
-            "description": f"{role_descriptions[key]} Ваша карта — «{card['shortUpright']}». В плюсе это проявляется через «{card['shortUpright']}», а в тени — через «{card['shortReversed']}».",
+            "description": role_descriptions[key],
+            "drawnMeaning": f"Если этот Аркан выпал в раскладе, он указывает на тему: {card['fullUpright']}.",
             "light": card["shortUpright"],
             "shadow": card["shortReversed"],
         }
@@ -269,7 +270,7 @@ def tarot_spread(payload: dict) -> dict:
     cards = []
     for index, (card, (position, prompt)) in enumerate(zip(drawn, spread["positions"])):
         reversed_card = bool(random.SystemRandom().getrandbits(1))
-        cards.append({"position": position, "positionPrompt": prompt, **{key: card[key] for key in ("id", "name", "number", "suit", "arcana", "element")}, "reversed": reversed_card, "meaning": card["fullReversed"] if reversed_card else card["fullUpright"]})
+        cards.append({"position": position, "positionPrompt": prompt, **{key: card[key] for key in ("id", "name", "number", "suit", "arcana", "element")}, "reversed": reversed_card, "meaning": card["fullReversed"] if reversed_card else card["fullUpright"], "drawnMeaning": f"Если карта выпала {'перевёрнутой' if reversed_card else 'прямой'}, она указывает на тему: {card['fullReversed'] if reversed_card else card['fullUpright']}."})
     for index, item in enumerate(cards):
         item["interpretation"] = tarot_interpretation(drawn[index], item["position"], question, item["reversed"], index, cards)
     return {"topic": topic, "spread": {"id": spread_id, "title": spread["title"], "description": spread["description"]}, "question": question, "cards": cards, "personalArcana": arcana, "aiPrompt": build_tarot_prompt(question, spread_id, cards, arcana), "summary": "Карты показывают возможные акценты и взаимосвязи, а не фиксированный исход. Итоговое решение и ответственность остаются у вас.", "disclaimer": TAROT_DISCLAIMER}
