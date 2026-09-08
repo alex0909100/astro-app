@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0a1a"><title>Astro App — внутренний космос</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div class="stars"></div>
+  <main class="app-shell">
+    <header class="topbar"><div class="brand"><span class="brand-mark">✦</span> ASTRO APP</div><button class="icon-button" id="profile-button">◯</button></header>
+    <section id="view-home" class="view">
+      <div class="hero"><p class="eyebrow">ПЕРСОНАЛЬНАЯ КОСМОГРАММА</p><h1>Открой свой<br><span>внутренний космос</span></h1><p class="hero-copy">Астрология и нумерология для осознанных пауз, вопросов и решений.</p></div>
+      <div class="daily-card"><div><p class="eyebrow">СЕГОДНЯ</p><h2>Время услышать себя</h2><p id="daily-text">Персональная подсказка появится после построения карты.</p></div><div class="moon">☾</div></div>
+      <section id="form-card" class="card"><div class="section-heading"><span class="step">01</span><h2>Данные рождения</h2></div>
+        <form id="birth-form"><label>Полное имя<input name="fullName" placeholder="Для числа имени"></label><label>Дата рождения<input name="birthDate" type="date" required></label><label>Время рождения <small>необязательно</small><input name="birthTime" type="time"></label><label>Город рождения<input name="placeName" placeholder="Например, Москва" required></label><button class="primary-button" type="submit">Построить карту <span>→</span></button></form>
+        <p class="hint">Для точного времени понадобится часовой пояс города.</p>
+      </section>
+    </section>
+    <section id="view-chart" class="view hidden"></section>
+    <section id="view-numbers" class="view hidden"></section>
+    <section id="view-profile" class="view hidden"></section>
+    <nav class="bottom-nav"><button class="active" data-view="home"><span>⌂</span>Главная</button><button data-view="chart"><span>◈</span>Карта</button><button data-view="numbers"><span>✧</span>Числа</button><button data-view="profile"><span>♙</span>Профиль</button></nav>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

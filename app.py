@@ -1,0 +1,388 @@
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import mimetypes
+import os
+import urllib.parse
+import urllib.request
+from datetime import date, datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from threading import Lock
+
+try:
+    import swisseph as swe
+except ImportError:
+    swe = None
+
+ROOT = Path(__file__).parent
+STATIC = ROOT / "static"
+DATA_FILE = ROOT / "astro_data.json"
+DATA_LOCK = Lock()
+DISCLAIMER = "Вся информация носит развлекательный характер и не является профессиональной консультацией."
+
+
+def load_local_env() -> None:
+    env_file = ROOT / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+load_local_env()
+
+SIGNS = [
+    ("Козерог", 120), ("Водолей", 219), ("Рыбы", 321), ("Овен", 420),
+    ("Телец", 521), ("Близнецы", 621), ("Рак", 722), ("Лев", 823),
+    ("Дева", 923), ("Весы", 1023), ("Скорпион", 1122), ("Стрелец", 1222),
+    ("Козерог", 1231),
+]
+PLANETS = ["Солнце", "Луна", "Меркурий", "Венера", "Марс", "Юпитер", "Сатурн", "Уран", "Нептун", "Плутон"]
+NUMBER_MEANINGS = {
+    "1": {"title": "Единица — инициатива", "text": "Самостоятельность, воля и способность начинать новое. Тень: упрямство и желание всё контролировать."},
+    "2": {"title": "Двойка — чувствительность", "text": "Дипломатия, эмпатия и умение сотрудничать. Тень: сомнения и зависимость от чужой оценки."},
+    "3": {"title": "Тройка — самовыражение", "text": "Творчество, юмор и лёгкость общения. Тень: рассеянность и незавершённые дела."},
+    "4": {"title": "Четвёрка — опора", "text": "Практичность, порядок и выносливость. Тень: излишняя жёсткость и страх перемен."},
+    "5": {"title": "Пятёрка — свобода", "text": "Любознательность, движение и любовь к опыту. Тень: импульсивность и трудность с режимом."},
+    "6": {"title": "Шестёрка — забота", "text": "Ответственность, красота и желание создавать уют. Тень: гиперопека и перфекционизм."},
+    "7": {"title": "Семёрка — глубина", "text": "Аналитичность, интуиция и интерес к смыслам. Тень: закрытость и уход в изоляцию."},
+    "8": {"title": "Восьмёрка — результат", "text": "Организация, влияние и умение обращаться с ресурсами. Тень: давление и чрезмерная ориентация на статус."},
+    "9": {"title": "Девятка — мудрость", "text": "Щедрость, широкий взгляд и стремление приносить пользу. Тень: спасательство и эмоциональное выгорание."},
+}
+PLANET_MEANINGS = {
+    "Солнце": "Личность, воля, самоощущение и способ сиять.",
+    "Луна": "Эмоции, привычки, чувство безопасности и внутренний ребёнок.",
+    "Меркурий": "Мышление, речь, обучение и обмен информацией.",
+    "Венера": "Симпатии, отношения, вкус и способ принимать удовольствие.",
+    "Марс": "Действие, желание, смелость и способ защищать границы.",
+    "Юпитер": "Рост, вера, смысл, удача и расширение возможностей.",
+    "Сатурн": "Дисциплина, ответственность, ограничения и зрелость.",
+    "Уран": "Свобода, перемены, оригинальность и неожиданные повороты.",
+    "Нептун": "Воображение, сострадание, идеалы и чувствительность.",
+    "Плутон": "Глубокая трансформация, сила и обновление.",
+}
+HOUSE_MEANINGS = {
+    1: "Я, внешность и способ начинать", 2: "Ресурсы, деньги и личные ценности",
+    3: "Общение, обучение и близкое окружение", 4: "Дом, семья и внутренний фундамент",
+    5: "Творчество, романтика и удовольствие", 6: "Ежедневность, навыки и забота о себе",
+    7: "Партнёрство и зеркала отношений", 8: "Доверие, общие ресурсы и перемены",
+    9: "Мировоззрение, путешествия и смысл", 10: "Призвание, карьера и репутация",
+    11: "Друзья, сообщество и будущее", 12: "Отдых, подсознание и восстановление",
+}
+
+
+def read_data() -> dict:
+    with DATA_LOCK:
+        if not DATA_FILE.exists():
+            return {"users": {}, "interpretations": {}, "events": []}
+        return json.loads(DATA_FILE.read_text(encoding="utf-8"))
+
+
+def write_data(data: dict) -> None:
+    with DATA_LOCK:
+        DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def reduce_number(value: int) -> int:
+    while value > 9 and value not in (11, 22, 33):
+        value = sum(int(char) for char in str(value))
+    return value
+
+
+def life_path(birth_date: str) -> int:
+    return reduce_number(sum(int(char) for char in birth_date if char.isdigit()))
+
+
+def name_number(name: str) -> int:
+    alphabet = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+    return reduce_number(sum((alphabet.index(letter.upper()) % 9) + 1 for letter in name if letter.upper() in alphabet))
+
+
+def zodiac(month: int, day: int) -> str:
+    value = month * 100 + day
+    return next(sign for sign, end in SIGNS if value <= end)
+
+
+def matrix_for(birth_date: str) -> dict[str, int]:
+    digits = "".join(char for char in birth_date if char.isdigit())
+    return {str(number): digits.count(str(number)) for number in range(1, 10)}
+
+
+def degree(seed: str, maximum: float = 360) -> float:
+    return round(int(hashlib.sha256(seed.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF * maximum, 2)
+
+
+def validate_telegram_init_data(init_data: str) -> dict:
+    if not init_data or not os.getenv("BOT_TOKEN"):
+        raise ValueError("Telegram initData is required")
+    values = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+    received_hash = values.pop("hash", "")
+    auth_date = int(values.get("auth_date", "0"))
+    if not received_hash or datetime.now(timezone.utc).timestamp() - auth_date > 86400:
+        raise ValueError("Expired Telegram initData")
+    data_check = "\n".join(f"{key}={values[key]}" for key in sorted(values))
+    secret = hmac.new(b"WebAppData", os.environ["BOT_TOKEN"].encode(), hashlib.sha256).digest()
+    expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, received_hash):
+        raise ValueError("Invalid Telegram initData signature")
+    return json.loads(values["user"]) if values.get("user") else {}
+
+
+def coordinates_for(place: str, payload: dict) -> tuple[float, float]:
+    if "latitude" in payload and "longitude" in payload:
+        return float(payload["latitude"]), float(payload["longitude"])
+    known = {
+        "москва": (55.7558, 37.6173), "санкт-петербург": (59.9343, 30.3351),
+        "тамбов": (52.7212, 41.4523), "киев": (50.4501, 30.5234),
+    }
+    return known.get(place.lower(), (55.7558, 37.6173))
+
+
+def swiss_positions(payload: dict, latitude: float, longitude: float) -> tuple[list[dict], dict]:
+    if swe is None or not payload.get("birthTime"):
+        return [], {}
+    parsed = datetime.fromisoformat(f"{payload['birthDate']}T{payload['birthTime']}")
+    julian = swe.julday(parsed.year, parsed.month, parsed.day, parsed.hour + parsed.minute / 60)
+    planet_ids = [swe.SUN, swe.MOON, swe.MERCURY, swe.VENUS, swe.MARS, swe.JUPITER, swe.SATURN, swe.URANUS, swe.NEPTUNE, swe.PLUTO]
+    positions = []
+    for name, planet_id in zip(PLANETS, planet_ids):
+        values, _ = swe.calc_ut(julian, planet_id)
+        longitude_value = values[0] % 360
+        positions.append({
+            "name": name, "sign": SIGNS[int(longitude_value // 30)][0],
+            "degree": round(longitude_value % 30, 2), "longitude": round(longitude_value, 4),
+            "house": None, "retrograde": values[3] < 0,
+            "meaning": PLANET_MEANINGS[name],
+        })
+    cusps, angles = swe.houses(julian, latitude, longitude, b"P")
+    for item in positions:
+        item["house"] = int(((item["longitude"] - angles[0]) % 360) // 30) + 1
+        item["houseMeaning"] = HOUSE_MEANINGS[item["house"]]
+    return positions, {"ascendant": round(angles[0], 4), "mc": round(angles[1], 4), "system": "Placidus"}
+
+
+def calculate(payload: dict) -> dict:
+    parsed = date.fromisoformat(payload["birthDate"])
+    place = payload.get("placeName", "Не указан").strip() or "Не указан"
+    sign = zodiac(parsed.month, parsed.day)
+    latitude, geo_longitude = coordinates_for(place, payload)
+    seed = f"{payload['birthDate']}|{payload.get('birthTime', '')}|{place}"
+    positions = []
+    for index, planet in enumerate(PLANETS):
+        planet_longitude = degree(f"{seed}|{planet}")
+        positions.append({
+            "name": planet,
+            "sign": SIGNS[int(planet_longitude // 30)][0],
+            "degree": round(planet_longitude % 30, 2),
+            "longitude": planet_longitude,
+            "house": (int(planet_longitude // 30) % 12) + 1,
+            "retrograde": index in (6, 7, 8, 9),
+            "meaning": PLANET_MEANINGS[planet],
+            "houseMeaning": HOUSE_MEANINGS[(int(planet_longitude // 30) % 12) + 1],
+        })
+    swiss, swiss_houses = swiss_positions(payload, latitude, geo_longitude)
+    calculation_mode = "swiss-ephemeris" if swiss else "demo-fallback"
+    if swiss:
+        positions = swiss
+    aspects = [
+        {"first": "Солнце", "second": "Луна", "type": "тригон", "orb": 2.4},
+        {"first": "Венера", "second": "Марс", "type": "соединение", "orb": 1.8},
+    ]
+    path = life_path(payload["birthDate"])
+    return {
+        "birthDate": payload["birthDate"], "birthTime": payload.get("birthTime") or "не указано",
+        "place": place, "zodiac": sign, "lifePath": path,
+        "soulNumber": reduce_number(sum(int(char) for char in payload["birthDate"].replace("-", ""))),
+        "nameNumber": name_number(payload.get("fullName", "")) if payload.get("fullName") else None,
+        "matrix": matrix_for(payload["birthDate"]), "planets": positions, "aspects": aspects,
+        "numberMeanings": NUMBER_MEANINGS,
+        "houseMeanings": HOUSE_MEANINGS,
+        "houses": swiss_houses or {"ascendant": round(degree(seed + "|asc", 360), 2), "system": "Placidus"},
+        "coordinates": {"latitude": latitude, "longitude": geo_longitude},
+        "interpretation": (
+            f"Число жизненного пути {path} связано с поиском собственного ритма и опыта. "
+            f"Солнце в знаке {sign} помогает проявлять себя через устойчивость и осознанный выбор. "
+            "Попробуйте сегодня заметить, какие решения дают ощущение внутренней опоры."
+        ),
+        "disclaimer": DISCLAIMER,
+        "calculationMode": calculation_mode,
+    }
+
+
+def forecast(chart: dict, period: str) -> dict:
+    key = f"{chart['birthDate']}:{period}:{date.today().isoformat()}"
+    luck = int(hashlib.sha256(key.encode()).hexdigest()[:2], 16) % 10 + 1
+    texts = {
+        "day": "День подходит для спокойного завершения начатого и честного разговора с собой.",
+        "week": "Неделя раскрывается через последовательные шаги: не торопите события и фиксируйте приоритеты.",
+        "month": "Месяц предлагает укрепить личные границы, пересмотреть ресурсы и оставить место для вдохновения.",
+    }
+    return {
+        "period": period,
+        "luck": luck,
+        "text": texts.get(period, texts["day"]),
+        "areas": {
+            "Любовь": "Говорите о чувствах прямо и оставляйте место для взаимности.",
+            "Деньги": "Проверьте приоритеты и избегайте решений на эмоциях.",
+            "Карьера": "Полезно завершить один важный шаг, а не распыляться.",
+            "Здоровье": "Поддержите базовый режим сна, отдыха и спокойного движения.",
+        },
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def compatibility(first: dict, second: dict) -> dict:
+    score = 50 + (life_path(first["birthDate"]) * 7 + life_path(second["birthDate"]) * 3) % 46
+    return {"score": score, "summary": "Связь раскрывается через уважение к разным темпам и открытый диалог.", "disclaimer": DISCLAIMER}
+
+
+def make_interpretation(chart: dict, kind: str) -> str:
+    data = read_data()
+    cache_key = hashlib.sha256(json.dumps([chart, kind], sort_keys=True).encode()).hexdigest()
+    if cache_key in data["interpretations"]:
+        return data["interpretations"][cache_key]
+    text = f"{chart['interpretation']} Формат: {kind}. Это подсказка для саморефлексии, а не предсказание."
+    data["interpretations"][cache_key] = text
+    write_data(data)
+    return text
+
+
+class Handler(BaseHTTPRequestHandler):
+    def send_json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_file(self, file_path: Path) -> None:
+        body = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(file_path.name)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def payload(self) -> dict:
+        length = int(self.headers.get("Content-Length", "0"))
+        return json.loads(self.rfile.read(length))
+
+    def do_GET(self) -> None:
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/api/health":
+            self.send_json(200, {"status": "ok", "service": "astro-app", "mode": "local"})
+        elif path == "/api/config":
+            self.send_json(200, {"telegram": bool(os.getenv("BOT_TOKEN")), "ai": bool(os.getenv("AI_API_KEY")), "stars": bool(os.getenv("BOT_TOKEN"))})
+        elif path.startswith("/api/forecast/"):
+            self.send_json(200, forecast({"birthDate": "1990-05-17"}, path.rsplit("/", 1)[-1]))
+        else:
+            relative = "index.html" if path == "/" else path.removeprefix("/")
+            file_path = (STATIC / relative).resolve()
+            if file_path.is_file() and STATIC.resolve() in file_path.parents:
+                self.send_file(file_path)
+            else:
+                self.send_error(404, "Not found")
+
+    def do_POST(self) -> None:
+        path = urllib.parse.urlparse(self.path).path
+        try:
+            payload = self.payload()
+            if path == "/api/calculate":
+                if not payload.get("birthDate"):
+                    raise ValueError("birthDate is required")
+                init_data = self.headers.get("X-Telegram-Init-Data", "")
+                telegram_user = validate_telegram_init_data(init_data) if init_data else {}
+                if telegram_user:
+                    payload["telegramUser"] = telegram_user
+                    payload["userId"] = str(telegram_user["id"])
+                chart = calculate(payload)
+                user_id = payload.get("userId", "local")
+                data = read_data()
+                user = data["users"].setdefault(user_id, {"freeAttemptUsed": False, "subscription": None, "telegramId": user_id})
+                if telegram_user:
+                    user["telegramId"] = telegram_user["id"]
+                    user["firstName"] = telegram_user.get("first_name", "")
+                if user["freeAttemptUsed"] and not user.get("subscription"):
+                    chart["locked"] = True
+                user["freeAttemptUsed"] = True
+                user["chart"] = chart
+                write_data(data)
+                self.send_json(200, chart)
+            elif path == "/api/interpretation":
+                self.send_json(200, {"text": make_interpretation(payload["chart"], payload.get("kind", "day")), "cached": True})
+            elif path == "/api/compatibility":
+                self.send_json(200, compatibility(payload["first"], payload["second"]))
+            elif path == "/api/subscribe":
+                user_id = payload.get("userId", "local")
+                data = read_data()
+                data["users"].setdefault(user_id, {})["subscription"] = {
+                    "plan": payload.get("plan", "monthly"), "status": "active",
+                    "expiresAt": (datetime.utcnow() + timedelta(days=30)).isoformat(),
+                    "paymentMode": "demo-stars",
+                }
+                write_data(data)
+                self.send_json(200, {"status": "active", "plan": payload.get("plan", "monthly"), "expiresAt": data["users"][user_id]["subscription"]["expiresAt"], "paymentMode": "demo-stars"})
+            elif path == "/api/invoice":
+                if not os.getenv("BOT_TOKEN"):
+                    raise ValueError("BOT_TOKEN is not configured")
+                user_id = str(payload.get("userId", "local"))
+                request_body = json.dumps({
+                    "title": "Astro App · месяц",
+                    "description": "Персональные прогнозы, совместимость и ежедневные подсказки.",
+                    "payload": f"subscription:monthly:{user_id}",
+                    "currency": "XTR",
+                    "prices": [{"label": "Месячная подписка", "amount": int(os.getenv("MONTHLY_STARS", "300"))}],
+                }).encode()
+                request = urllib.request.Request(
+                    f"https://api.telegram.org/bot{os.environ['BOT_TOKEN']}/createInvoiceLink",
+                    data=request_body, headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    invoice = json.loads(response.read())
+                if not invoice.get("ok"):
+                    raise ValueError("Telegram invoice creation failed")
+                self.send_json(200, {"invoiceUrl": invoice["result"]})
+            elif path == "/api/analytics":
+                data = read_data()
+                data["events"].append({"name": payload.get("name"), "at": datetime.utcnow().isoformat()})
+                write_data(data)
+                self.send_json(200, {"ok": True})
+            elif path == "/api/geocode":
+                query = urllib.parse.quote(payload.get("query", ""))
+                request = urllib.request.Request(f"https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q={query}", headers={"User-Agent": "astro-app-local/1.0"})
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    result = json.loads(response.read())
+                self.send_json(200, {"results": result})
+            else:
+                self.send_error(404, "Not found")
+        except (ValueError, KeyError, json.JSONDecodeError) as error:
+            self.send_json(400, {"error": str(error)})
+        except Exception as error:
+            self.send_json(502, {"error": f"External service unavailable: {error}"})
+
+    def do_DELETE(self) -> None:
+        if urllib.parse.urlparse(self.path).path != "/api/account":
+            self.send_error(404, "Not found")
+            return
+        try:
+            user_id = self.payload().get("userId", "local")
+            data = read_data()
+            data["users"].pop(user_id, None)
+            write_data(data)
+            self.send_json(200, {"deleted": True})
+        except (ValueError, json.JSONDecodeError) as error:
+            self.send_json(400, {"error": str(error)})
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8000"))
+    print(f"Astro App running at http://127.0.0.1:{port}")
+    host = os.getenv("HOST", "127.0.0.1")
+    ThreadingHTTPServer((host, port), Handler).serve_forever()

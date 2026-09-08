@@ -1,0 +1,8 @@
+.env
+astro_data.json
+__pycache__/
+*.pyc
+.cloudflared.log
+.cloudflared-error.log
+tunnel-out.log
+tunnel-err.log

@@ -1,0 +1,12 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^python -m py_compile app\\.py$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python -c \"import importlib\\.util; print\\('swisseph', bool\\(importlib\\.util\\.find_spec\\('swisseph'\\)\\)\\); print\\('cryptography', bool\\(importlib\\.util\\.find_spec\\('cryptography'\\)\\)\\); print\\('fastapi', bool\\(importlib\\.util\\.find_spec\\('fastapi'\\)\\)\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
