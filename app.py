@@ -646,10 +646,7 @@ def make_interpretation(chart: dict, kind: str) -> str:
         json.dumps({"type": module, "data": chart}, ensure_ascii=False)
         + "\nСоставь связный персональный ответ по правилам выбранного модуля."
     )
-    try:
-        return cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)[0]
-    except (ValueError, OSError, json.JSONDecodeError):
-        return f"{chart['interpretation']} Формат: {kind}. Это подсказка для саморефлексии, а не предсказание."
+    return cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)[0]
 
 
 def tarot_ai_interpretation(spread: dict) -> tuple[str, bool]:
@@ -663,10 +660,18 @@ def tarot_ai_interpretation(spread: dict) -> tuple[str, bool]:
         }}, ensure_ascii=False)
         + "\nДай содержательную интерпретацию по правилам модуля TAROT."
     )
-    try:
-        return cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)
-    except (ValueError, OSError, json.JSONDecodeError):
-        return spread["summary"], False
+    return cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)
+
+
+def ai_forecast(chart: dict, period: str) -> dict:
+    base = forecast(chart, period)
+    cache_key = hashlib.sha256(json.dumps([chart, period, date.today().isoformat()], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    user_prompt = json.dumps({
+        "type": "daily",
+        "data": {"period": period, "chart": chart, "baseTransitContext": base},
+    }, ensure_ascii=False) + "\nСформулируй прогноз строго по модулю DAILY."
+    text = cache_ai_text(cache_key, AI_SYSTEM_PROMPT, user_prompt)[0]
+    return {**base, "text": text, "areas": {}, "aiProvider": "YandexGPT"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -718,7 +723,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("birthDate is required")
             self.send_json(200, {"birthDate": birth_date, "personalArcana": personal_arcana(birth_date)})
         elif path.startswith("/api/forecast/"):
-            self.send_json(200, forecast({"birthDate": "1990-05-17"}, path.rsplit("/", 1)[-1]))
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            user_id = query.get("userId", ["local"])[0]
+            chart = read_data().get("users", {}).get(str(user_id), {}).get("chart")
+            if not chart:
+                raise ValueError("Сначала постройте натальную карту")
+            self.send_json(200, ai_forecast(chart, path.rsplit("/", 1)[-1]))
         elif path == "/admin/stats":
             try:
                 admin = require_admin(self)
