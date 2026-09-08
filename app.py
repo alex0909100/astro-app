@@ -207,7 +207,8 @@ def personal_arcana(birth_date: str) -> dict:
     def reduce_arcana(value: int) -> int:
         while value > 22:
             value -= 22
-        return value or 22
+        # In the Rider-Waite convention 0 is the equivalent of 22: the Fool.
+        return 22 if value == 0 else value
     personality = reduce_arcana(parsed.day)
     destiny = reduce_arcana(sum(int(char) for char in birth_date if char.isdigit()))
     additional = reduce_arcana(sum(int(char) for char in f"{parsed.month:02d}{parsed.year:04d}"))
