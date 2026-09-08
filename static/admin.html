@@ -13,5 +13,6 @@
     <section class="panel"><h2>Регистрации по дням</h2><div id="registrations" class="bars"></div></section>
     <section class="panel"><div class="panel-head"><h2>Пользователи</h2><input id="search" placeholder="ID или username"></div><div class="table-wrap"><table><thead><tr><th>Пользователь</th><th>Регистрация</th><th>VIP</th><th>Действия</th></tr></thead><tbody id="users"></tbody></table></div></section>
     <section class="panel"><h2>Обратная связь</h2><div id="feedback"></div><form id="reply-form"><input id="reply-user" placeholder="Telegram ID пользователя" required><textarea id="reply-text" placeholder="Ответ пользователю" required></textarea><button>Ответить через бота</button></form></section>
+    <section class="panel"><h2>Администраторы</h2><p class="muted">Добавьте числовой Telegram ID. Основной администратор из переменной окружения защищён от удаления.</p><form id="admin-form"><input id="admin-id" inputmode="numeric" placeholder="Telegram ID нового администратора" required><button>Добавить администратора</button></form><div id="admins"></div></section>
   </main><script src="/admin.js"></script>
 </body></html>

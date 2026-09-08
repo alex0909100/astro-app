@@ -305,12 +305,18 @@ def telegram_api(method: str, payload: dict) -> dict:
 
 
 def require_admin(handler: BaseHTTPRequestHandler) -> dict:
-    admin_telegram_id = os.getenv("ADMIN_TELEGRAM_ID", "")
-    if not admin_telegram_id:
+    configured_ids = {
+        value.strip() for value in (
+            os.getenv("ADMIN_TELEGRAM_ID", "") + "," + os.getenv("ADMIN_TELEGRAM_IDS", "")
+        ).split(",") if value.strip()
+    }
+    data = read_data()
+    configured_ids.update(str(value) for value in data.get("admins", {}).keys())
+    if not configured_ids:
         raise ValueError("ADMIN_TELEGRAM_ID is not configured")
     init_data = handler.headers.get("X-Telegram-Init-Data", "")
     user = validate_telegram_init_data(init_data)
-    if str(user.get("id")) != str(admin_telegram_id):
+    if str(user.get("id")) not in configured_ids:
         raise PermissionError("Admin access denied")
     return user
 
@@ -661,6 +667,23 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(503, {"error": str(error)})
                 return
             self.send_json(200, {"messages": read_data().get("feedback_messages", [])})
+        elif path == "/admin/admins":
+            try:
+                admin = require_admin(self)
+            except PermissionError as error:
+                self.send_json(403, {"error": str(error)})
+                return
+            except ValueError as error:
+                self.send_json(503, {"error": str(error)})
+                return
+            data = read_data()
+            env_ids = {
+                value.strip() for value in (
+                    os.getenv("ADMIN_TELEGRAM_ID", "") + "," + os.getenv("ADMIN_TELEGRAM_IDS", "")
+                ).split(",") if value.strip()
+            }
+            stored = [{"telegramId": str(key), "source": "database"} for key in data.get("admins", {})]
+            self.send_json(200, {"admins": [{"telegramId": value, "source": "environment", "protected": value == os.getenv("ADMIN_TELEGRAM_ID")} for value in sorted(env_ids)] + stored, "requestedBy": str(admin["id"])})
         elif path == "/admin":
             self.send_file(STATIC / "admin.html")
         else:
@@ -824,6 +847,37 @@ class Handler(BaseHTTPRequestHandler):
                 record_admin_action(data, str(admin["id"]), "feedback_reply", target, {"messageLength": len(message)})
                 write_data(data)
                 self.send_json(200, {"ok": True})
+            elif path == "/admin/admins":
+                admin = require_admin(self)
+                target_id = str(payload.get("telegramId", "")).strip()
+                if not target_id.isdigit():
+                    raise ValueError("Telegram ID must contain digits only")
+                configured_ids = {
+                    value.strip() for value in (
+                        os.getenv("ADMIN_TELEGRAM_ID", "") + "," + os.getenv("ADMIN_TELEGRAM_IDS", "")
+                    ).split(",") if value.strip()
+                }
+                data = read_data()
+                data.setdefault("admins", {})[target_id] = {
+                    "telegramId": target_id,
+                    "addedBy": str(admin["id"]),
+                    "addedAt": datetime.utcnow().isoformat(),
+                }
+                record_admin_action(data, str(admin["id"]), "admin_granted", target_id)
+                write_data(data)
+                self.send_json(200, {"ok": True, "telegramId": target_id, "alreadyConfigured": target_id in configured_ids})
+            elif path == "/admin/admins/remove":
+                admin = require_admin(self)
+                target_id = str(payload.get("telegramId", "")).strip()
+                if target_id == os.getenv("ADMIN_TELEGRAM_ID"):
+                    raise ValueError("The primary administrator cannot be removed from the panel")
+                data = read_data()
+                if target_id not in data.get("admins", {}):
+                    raise ValueError("Administrator not found in managed administrators")
+                data["admins"].pop(target_id)
+                record_admin_action(data, str(admin["id"]), "admin_revoked", target_id)
+                write_data(data)
+                self.send_json(200, {"ok": True, "telegramId": target_id})
             else:
                 self.send_error(404, "Not found")
         except PermissionError as error:

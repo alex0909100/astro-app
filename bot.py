@@ -29,7 +29,11 @@ router = Router()
 WEB_APP_URL = os.environ["WEB_APP_URL"]
 MONTHLY_STARS = int(os.getenv("MONTHLY_STARS", "300"))
 APP_API_URL = os.getenv("APP_API_URL", "http://127.0.0.1:8000")
-ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID", "")
+ADMIN_TELEGRAM_IDS = {
+    value.strip() for value in (
+        os.getenv("ADMIN_TELEGRAM_ID", "") + "," + os.getenv("ADMIN_TELEGRAM_IDS", "")
+    ).split(",") if value.strip()
+}
 
 
 def app_keyboard() -> InlineKeyboardMarkup:
@@ -49,7 +53,7 @@ async def start(message: Message) -> None:
 
 @router.message(Command("admin"))
 async def admin(message: Message) -> None:
-    if not ADMIN_TELEGRAM_ID or str(message.from_user.id) != str(ADMIN_TELEGRAM_ID):
+    if not ADMIN_TELEGRAM_IDS or str(message.from_user.id) not in ADMIN_TELEGRAM_IDS:
         await message.answer("Доступ запрещён.")
         return
     await message.answer("Админ-панель Astro App:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[

@@ -74,7 +74,7 @@ Telegram принимает Mini App только по HTTPS (кроме спе�
 
 ### Админ-панель
 
-Укажите в Railway Variables `ADMIN_TELEGRAM_ID` — числовой Telegram ID администратора. Откройте `/admin` внутри Telegram Mini App или отправьте боту `/admin`. Каждый admin API-запрос проверяет подписанный `X-Telegram-Init-Data`; одного знания URL недостаточно.
+Укажите в Railway Variables `ADMIN_TELEGRAM_ID` — числовой Telegram ID главного администратора. Откройте `/admin` внутри Telegram Mini App или отправьте боту `/admin`. Каждый admin API-запрос проверяет подписанный `X-Telegram-Init-Data`; одного знания URL недостаточно. После входа главный администратор может добавить другие ID в разделе «Администраторы». Для нескольких статически заданных администраторов можно использовать `ADMIN_TELEGRAM_IDS=111,222`.
 
 Доступные endpoints: `GET /admin/stats`, `GET /admin/users`, `POST /admin/set-vip`, `GET/POST /admin/feedback`. Сообщения пользователей отправляются через `POST /api/feedback` и пересылаются администратору ботом. Для PostgreSQL предусмотрены сущности `admin_actions` и `feedback_messages`; текущий MVP сохраняет их в `astro_data.json` до миграции storage.
 
