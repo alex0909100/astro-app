@@ -164,7 +164,8 @@ TAROT_SAFETY_MESSAGE = "Карты не отвечают на вопросы о 
 
 
 def tarot_deck() -> list[dict]:
-    major_numbers = {name: index + 1 for index, (name, _, _) in enumerate(MAJOR_ARCANA)}
+    # In this system the Fool is 22 (the equivalent of 0), followed by Magician 1.
+    major_numbers = {name: (index or 22) for index, (name, _, _) in enumerate(MAJOR_ARCANA)}
     deck = [{
         "id": f"major-{number}", "name": name, "number": number, "suit": None,
         "arcana": "Старший Аркан", "element": "дух",
@@ -184,7 +185,7 @@ def tarot_deck() -> list[dict]:
 
 
 def personal_arcana(birth_date: str) -> dict:
-    parsed = date.fromisoformat(birth_date)
+    parsed = date.fromisoformat(birth_date) if "-" in birth_date else datetime.strptime(birth_date, "%d.%m.%Y").date()
     cards = tarot_deck()
     by_number = {card["number"]: card for card in cards if card["arcana"] == "Старший Аркан"}
     def reduce_arcana(value: int) -> int:
