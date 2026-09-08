@@ -39,6 +39,7 @@ if __name__ == "__main__":
             stop_process(bot)
             raise SystemExit("Web application stopped unexpectedly")
         if bot.poll() is not None:
-            stop_process(app)
-            raise SystemExit("Telegram bot stopped unexpectedly")
+            # Telegram polling can be interrupted by transient network errors.
+            # Keep the public Mini App alive and restart only the bot process.
+            bot = subprocess.Popen([sys.executable, "bot.py"], env=env)
         time.sleep(2)
