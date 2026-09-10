@@ -851,7 +851,12 @@ class Handler(BaseHTTPRequestHandler):
             if not chart:
                 self.send_json(400, {"error": "Сначала постройте натальную карту"})
                 return
-            self.send_json(200, ai_forecast(chart, path.rsplit("/", 1)[-1], user.get("firstName", "")))
+            try:
+                result = ai_forecast(chart, path.rsplit("/", 1)[-1], user.get("firstName", ""))
+            except ValueError as error:
+                self.send_json(502, {"error": str(error)})
+                return
+            self.send_json(200, result)
         elif path == "/admin/stats":
             try:
                 admin = require_admin(self)
