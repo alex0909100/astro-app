@@ -62,7 +62,10 @@ function renderDaily() {
 async function loadDailyForecast() {
   const target = $("#daily-reading"); if (!target) return;
   try {
-    const response = await apiFetch(`/api/forecast/day?userId=${encodeURIComponent(state.userId)}`);
+    const response = await apiFetch("/api/forecast/day", {
+      method: "POST",
+      body: JSON.stringify({ userId: state.userId, firstName: state.chart.firstName || "", chart: state.chart })
+    });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Не удалось загрузить прогноз");
     target.innerHTML = `<div class="section-heading"><span class="step">YANDEXGPT</span><h2>Ваш прогноз на сегодня</h2></div><div class="ai-text">${escapeHtml(data.text)}</div><p class="muted">Прогноз обновляется каждый день.</p>`;

@@ -919,7 +919,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         try:
             payload = self.payload()
-            if path == "/api/calculate":
+            if path == "/api/forecast/day":
+                chart = payload.get("chart")
+                if not isinstance(chart, dict) or not chart.get("birthDate"):
+                    raise ValueError("Сначала постройте натальную карту")
+                self.send_json(200, ai_forecast(chart, "day", str(payload.get("firstName", ""))))
+            elif path == "/api/calculate":
                 if not payload.get("birthDate"):
                     raise ValueError("birthDate is required")
                 init_data = self.headers.get("X-Telegram-Init-Data", "")
