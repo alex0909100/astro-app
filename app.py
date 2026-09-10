@@ -6,7 +6,6 @@ import json
 import mimetypes
 import os
 import random
-import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -428,7 +427,7 @@ DAILY_SYSTEM_PROMPT = """Ты — персональный астролог, н�
   об общем режиме, отдыхе, внимании к себе и эмоциональном состоянии.
 - Не придумывай факты и не повторяй один шаблон изо дня в день.
 
-Строго соблюдай порядок и заголовки:
+Строго соблюдай порядок и заголовки. Пиши разборчиво, с короткими абзацами:
 1. «Доброе утро» — обратись по имени, а если его нет, используй «Друг мой», и опиши общий тон дня.
 2. «Любовь и отношения», «Работа и карьера», «Финансы», «Здоровье и самочувствие» —
    по одному персональному абзацу на каждую сферу. Для финансов только общие темы внимания,
@@ -438,7 +437,8 @@ DAILY_SYSTEM_PROMPT = """Ты — персональный астролог, н�
 5. «Аффирмация дня» — короткая позитивная фраза.
 6. Заверши дисклеймером: «Прогноз носит развлекательный характер и не заменяет профессиональную консультацию».
 Затем добавь мягкий призыв: «Подписка открывает ежедневные персональные подсказки и расширенные прогнозы».
-Не добавляй медицинских, финансовых или юридических обещаний."""
+Не добавляй медицинских, финансовых или юридических обещаний.
+Объём: 8–12 коротких абзацев, примерно 500–800 слов. Не перечисляй данные карты без объяснения их связи с сегодняшним днём."""
 
 
 def cache_ai_text(cache_key: str, system_prompt: str, user_prompt: str) -> tuple[str, bool]:
@@ -739,17 +739,34 @@ def tarot_ai_interpretation(spread: dict) -> tuple[str, bool]:
 
 def ai_forecast(chart: dict, period: str, user_name: str = "") -> dict:
     base = forecast(chart, period)
-    cache_key = hashlib.sha256(json.dumps([chart, period, user_name, date.today().isoformat()], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    compact_chart = {
+        "birthDate": chart.get("birthDate"),
+        "birthTime": chart.get("birthTime"),
+        "place": chart.get("place"),
+        "zodiac": chart.get("zodiac"),
+        "lifePath": chart.get("lifePath"),
+        "soulNumber": chart.get("soulNumber"),
+        "nameNumber": chart.get("nameNumber"),
+        "matrix": chart.get("matrix"),
+        "personalArcana": chart.get("personalArcana"),
+        "planets": [
+            {
+                "name": planet.get("name"),
+                "sign": planet.get("sign"),
+                "house": planet.get("house"),
+                "retrograde": planet.get("retrograde"),
+            }
+            for planet in chart.get("planets", [])
+        ],
+        "aspects": chart.get("aspects", []),
+    }
+    cache_key = hashlib.sha256(json.dumps([compact_chart, period, user_name, date.today().isoformat()], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     user_prompt = json.dumps({
         "type": "daily",
-        "data": {"name": user_name, "period": period, "date": date.today().isoformat(), "chart": chart, "baseTransitContext": base},
+        "data": {"name": user_name, "period": period, "date": date.today().isoformat(), "chart": compact_chart, "baseTransitContext": base},
     }, ensure_ascii=False) + "\nСформулируй прогноз строго по правилам ежедневного модуля."
-    try:
-        text = cache_ai_text(cache_key, DAILY_SYSTEM_PROMPT, user_prompt)[0]
-        return {**base, "text": text, "areas": {}, "aiProvider": "YandexGPT"}
-    except (ValueError, urllib.error.HTTPError) as error:
-        print(f"YandexGPT daily forecast unavailable: {error}")
-        return {**base, "areas": {}, "aiProvider": "local-fallback"}
+    text = cache_ai_text(cache_key, DAILY_SYSTEM_PROMPT, user_prompt)[0]
+    return {**base, "text": text, "areas": {}, "aiProvider": "YandexGPT"}
 
 
 class Handler(BaseHTTPRequestHandler):
