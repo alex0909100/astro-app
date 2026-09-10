@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import random
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -743,8 +744,12 @@ def ai_forecast(chart: dict, period: str, user_name: str = "") -> dict:
         "type": "daily",
         "data": {"name": user_name, "period": period, "date": date.today().isoformat(), "chart": chart, "baseTransitContext": base},
     }, ensure_ascii=False) + "\nСформулируй прогноз строго по правилам ежедневного модуля."
-    text = cache_ai_text(cache_key, DAILY_SYSTEM_PROMPT, user_prompt)[0]
-    return {**base, "text": text, "areas": {}, "aiProvider": "YandexGPT"}
+    try:
+        text = cache_ai_text(cache_key, DAILY_SYSTEM_PROMPT, user_prompt)[0]
+        return {**base, "text": text, "areas": {}, "aiProvider": "YandexGPT"}
+    except (ValueError, urllib.error.HTTPError) as error:
+        print(f"YandexGPT daily forecast unavailable: {error}")
+        return {**base, "areas": {}, "aiProvider": "local-fallback"}
 
 
 class Handler(BaseHTTPRequestHandler):
