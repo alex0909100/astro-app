@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import random
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -349,8 +350,12 @@ def yandexgpt_generate(system_prompt: str, user_prompt: str) -> str:
         }, ensure_ascii=False).encode(),
         headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=45) as response:
-        result = json.loads(response.read())
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            result = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        details = error.read().decode("utf-8", errors="replace")[:500]
+        raise ValueError(f"YandexGPT API error {error.code}: {details}") from error
     alternatives = result.get("result", {}).get("alternatives", [])
     if not alternatives or not alternatives[0].get("message", {}).get("text"):
         raise ValueError("YandexGPT returned an empty response")
