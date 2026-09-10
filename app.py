@@ -803,7 +803,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/forecast/"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             user_id = query.get("userId", ["local"])[0]
-            telegram_user = validate_telegram_init_data(self.headers.get("X-Telegram-Init-Data", ""))
+            init_data = self.headers.get("X-Telegram-Init-Data", "")
+            telegram_user = validate_telegram_init_data(init_data) if init_data else {}
             if telegram_user:
                 user_id = str(telegram_user["id"])
             user = read_data().get("users", {}).get(str(user_id), {})
