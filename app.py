@@ -332,7 +332,7 @@ def telegram_api(method: str, payload: dict) -> dict:
     return result
 
 
-def yandexgpt_generate(system_prompt: str, user_prompt: str) -> str:
+def yandexgpt_generate(system_prompt: str, user_prompt: str, max_tokens: int | None = None) -> str:
     api_key = os.getenv("YANDEX_API_KEY") or os.getenv("YANDEXGPT_API_KEY")
     folder_id = os.getenv("YANDEX_FOLDER_ID")
     if not api_key or not folder_id:
@@ -344,7 +344,7 @@ def yandexgpt_generate(system_prompt: str, user_prompt: str) -> str:
             "completionOptions": {
                 "stream": False,
                 "temperature": float(os.getenv("YANDEXGPT_TEMPERATURE", "0.55")),
-                "maxTokens": int(os.getenv("YANDEXGPT_MAX_TOKENS", "1800")),
+                "maxTokens": max_tokens or int(os.getenv("YANDEXGPT_MAX_TOKENS", "1200")),
             },
             "messages": [{"role": "system", "text": system_prompt}, {"role": "user", "text": user_prompt}],
         }, ensure_ascii=False).encode(),
@@ -446,12 +446,12 @@ DAILY_SYSTEM_PROMPT = """Ты — персональный астролог, н�
 Объём: 8–12 коротких абзацев, примерно 500–800 слов. Не перечисляй данные карты без объяснения их связи с сегодняшним днём."""
 
 
-def cache_ai_text(cache_key: str, system_prompt: str, user_prompt: str) -> tuple[str, bool]:
+def cache_ai_text(cache_key: str, system_prompt: str, user_prompt: str, max_tokens: int | None = None) -> tuple[str, bool]:
     data = read_data()
     key = f"yandexgpt:v3:{cache_key}"
     if key in data.setdefault("interpretations", {}):
         return data["interpretations"][key], True
-    text = yandexgpt_generate(system_prompt, user_prompt)
+    text = yandexgpt_generate(system_prompt, user_prompt, max_tokens=max_tokens)
     data["interpretations"][key] = text
     write_data(data)
     return text, False
@@ -770,7 +770,7 @@ def ai_forecast(chart: dict, period: str, user_name: str = "") -> dict:
         "type": "daily",
         "data": {"name": user_name, "period": period, "date": date.today().isoformat(), "chart": compact_chart, "baseTransitContext": base},
     }, ensure_ascii=False) + "\nСформулируй прогноз строго по правилам ежедневного модуля."
-    text = cache_ai_text(cache_key, DAILY_SYSTEM_PROMPT, user_prompt)[0]
+    text = cache_ai_text(cache_key, DAILY_SYSTEM_PROMPT, user_prompt, max_tokens=1200)[0]
     return {**base, "text": text, "areas": {}, "aiProvider": "YandexGPT"}
 
 
