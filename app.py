@@ -802,15 +802,28 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"birthDate": birth_date, "personalArcana": personal_arcana(birth_date)})
         elif path.startswith("/api/forecast/"):
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            user_id = query.get("userId", ["local"])[0]
+            requested_user_id = query.get("userId", ["local"])[0]
+            user_id = requested_user_id
             init_data = self.headers.get("X-Telegram-Init-Data", "")
-            telegram_user = validate_telegram_init_data(init_data) if init_data else {}
+            try:
+                telegram_user = validate_telegram_init_data(init_data) if init_data else {}
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+                return
             if telegram_user:
                 user_id = str(telegram_user["id"])
-            user = read_data().get("users", {}).get(str(user_id), {})
+            data = read_data()
+            user = data.get("users", {}).get(str(user_id), {})
+            legacy_user = data.get("users", {}).get(str(requested_user_id), {})
+            if telegram_user and not user.get("chart") and legacy_user.get("chart"):
+                user = data["users"].setdefault(str(user_id), {})
+                user["chart"] = legacy_user["chart"]
+                user.setdefault("firstName", legacy_user.get("firstName", ""))
+                write_data(data)
             chart = user.get("chart")
             if not chart:
-                raise ValueError("Сначала постройте натальную карту")
+                self.send_json(400, {"error": "Сначала постройте натальную карту"})
+                return
             self.send_json(200, ai_forecast(chart, path.rsplit("/", 1)[-1], user.get("firstName", "")))
         elif path == "/admin/stats":
             try:
@@ -933,6 +946,7 @@ class Handler(BaseHTTPRequestHandler):
                     chart["locked"] = True
                 user["freeAttemptUsed"] = True
                 user["chart"] = chart
+                chart["userId"] = str(user_id)
                 write_data(data)
                 self.send_json(200, chart)
             elif path == "/api/register-user":

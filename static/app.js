@@ -32,6 +32,10 @@ $("#birth-form").addEventListener("submit", async (event) => {
       state.subscription = state.chart.subscription;
       localStorage.setItem("astroSubscription", JSON.stringify(state.subscription));
     }
+    if (state.chart.userId) {
+      state.userId = state.chart.userId;
+      localStorage.setItem("astroUserId", state.userId);
+    }
     localStorage.setItem("astroChart", JSON.stringify(state.chart));
     await track("chart_created"); renderChart(); showView("chart");
   } catch (error) { alert(error.message); } finally { button.disabled = false; button.innerHTML = "Построить карту <span>→</span>"; }
